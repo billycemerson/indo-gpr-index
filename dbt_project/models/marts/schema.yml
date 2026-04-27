@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: mart_gpr_daily
+    description: "Daily Geopolitical Risk Index calculated using Caldara & Iacoviello methodology adapted for Indonesian news."
+    columns:
+      - name: published_date
+        description: "The date the news articles were published."
+        tests:
+          - unique
+          - not_null
+      
+      - name: total_articles
+        description: "Total deduplicated articles for the day. Must be at least 1 to avoid division by zero."
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+
+      - name: total_gpr_index
+        description: "The final Geopolitical Risk Score."
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
