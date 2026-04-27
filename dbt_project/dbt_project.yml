@@ -1,0 +1,11 @@
+name: 'dbt_project'
+version: '1.0.0'
+profile: 'dbt_project' # Must match the name in profiles.yml
+
+# Tell dbt our model folder structure
+models:
+  dbt_project:
+    staging:
+      +materialized: view # Staging is fine as a Virtual View (saves memory)
+    marts:
+      +materialized: table # Mart (Final result) is saved as a physical table for fast reading
