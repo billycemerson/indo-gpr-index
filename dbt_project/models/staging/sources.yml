@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: gpr_raw
+    schema: main
+    tables:
+      - name: raw_news
+        description: "Raw articles loaded via Python scraper."

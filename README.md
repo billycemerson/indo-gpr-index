@@ -4,6 +4,6 @@
 
 - [x] Initial project setup
 - [x] ANTARA News scraper integration
-- [ ] DuckDB & dbt transformation
+- [x] DuckDB & dbt transformation
 - [ ] GPR dictionary mapping
 - [ ] GPR index calculate and storage
