@@ -8,6 +8,10 @@ class Config:
     # Data directories
     DATA_DIR = ROOT_DIR / "data"
     RAW_DATA_DIR = DATA_DIR / "raw"
+
+    # Google Sheet credentials
+    CREDENTIALS_DIR = ROOT_DIR / "config" / "credentials"
+    GSHEET_KEY_PATH = CREDENTIALS_DIR / "gsheet_key.json"
     
     # Ensure directories exist
     RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
