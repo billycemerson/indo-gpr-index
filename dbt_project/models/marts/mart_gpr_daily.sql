@@ -1,13 +1,14 @@
 {{ config(
     materialized='incremental',
-    unique_key='published_date'
+    unique_key='published_date',
+    column_types={'published_date': 'DATE'}
 ) }}
 
 WITH staging AS (
     SELECT * FROM {{ ref('stg_antara_news') }}
 
     {% if is_incremental() %}
-        WHERE published_date >= (SELECT COALESCE(MAX(published_date), '1970-01-01') FROM {{ this }})
+        WHERE published_date >= (SELECT COALESCE(MAX(published_date), CAST('1970-01-01' AS DATE)) FROM {{ this }})
     {% endif %}
 ),
 
