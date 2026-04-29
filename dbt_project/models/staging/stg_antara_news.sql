@@ -10,8 +10,8 @@ cleaned_data AS (
         link,
         category,
         date_text,
-        -- Assuming scraper runs daily to fetch 'Kemarin', we assign yesterday's date
-        (CURRENT_DATE - INTERVAL 1 DAY)::DATE AS published_date
+        -- Force the string from Python into a pure DATE type for DuckDB
+        CAST(published_date AS DATE) AS published_date
     FROM source_data
 ),
 
