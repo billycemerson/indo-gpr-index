@@ -10,6 +10,7 @@ cleaned_data AS (
         link,
         category,
         date_text,
+        source,
         -- Force the string from Python into a pure DATE type for DuckDB
         CAST(published_date AS DATE) AS published_date
     FROM source_data

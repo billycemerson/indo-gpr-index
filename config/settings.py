@@ -1,5 +1,5 @@
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class Config:
     # Get project root (2 levels up from this file)
@@ -17,10 +17,17 @@ class Config:
     RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
     
     @classmethod
-    def get_raw_scrape_path(cls):
-        """Generates path: data/raw/scrape_YYYY-MM-DD.json"""
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        return cls.RAW_DATA_DIR / f"scrape_{today_str}.json"
+    def get_raw_scrape_path(cls, target_date: str = None) -> Path:
+        """
+        Returns the path for the JSON file.
+        If target_date is not provided, it defaults to yesterday's date.
+        """
+        if target_date is None:
+            # Default to yesterday because we always scrape yesterday's news
+            target_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            
+        filename = f"scrape_{target_date}.json"
+        return cls.RAW_DATA_DIR / filename
 
     BASE_URL = "https://www.antaranews.com"
     HEADERS = {

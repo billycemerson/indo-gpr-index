@@ -5,7 +5,7 @@
 ) }}
 
 WITH staging AS (
-    SELECT * FROM {{ ref('stg_antara_news') }}
+    SELECT * FROM {{ ref('stg_scraped_news') }}
 
     {% if is_incremental() %}
         WHERE published_date >= (SELECT COALESCE(MAX(published_date), CAST('1970-01-01' AS DATE)) FROM {{ this }})
