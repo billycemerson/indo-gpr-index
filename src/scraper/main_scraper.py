@@ -21,6 +21,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from config.settings import Config
 from src.scraper.parsers.antara import AntaraParser
 from src.scraper.parsers.kompas import KompasParser
+from src.scraper.parsers.tempo import TempoParser
 
 
 #  Parser registry — add new sources here only
@@ -32,9 +33,9 @@ def build_parsers() -> list:
     the orchestration loop below treats them all identically.
     """
     return [
-        AntaraParser(base_url=Config.BASE_URL, headers=Config.HEADERS),
+        AntaraParser(),
         KompasParser(),
-        # DetikParser(),   <- uncomment when parsers/detik.py is implemented
+        TempoParser()
     ]
 
 

@@ -15,16 +15,21 @@ from bs4 import BeautifulSoup
 
 from src.scraper.base_parser import BaseParser
 
-
 class AntaraParser(BaseParser):
 
     CATEGORIES = ["politik", "ekonomi", "hukum"]
     MAX_PAGES = 10
     REQUEST_DELAY = 1  # seconds between page requests
 
-    def __init__(self, base_url: str, headers: dict):
-        self._base_url = base_url.rstrip("/")
-        self._headers = headers
+    def __init__(self):
+        self._base_url = "https://antaranews.com"
+        self._headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            )
+        }
 
     #  BaseParser contract
 
