@@ -3,7 +3,7 @@
 ## Progress Checklist
 
 - [x] Initial project setup
-- [x] ANTARA News scraper integration
+- [x] Multiple source scraper integration (ANTARA News, Kompas, and Tempo)
 - [x] DuckDB & dbt transformation
-- [ ] GPR dictionary mapping
-- [ ] GPR index calculate and storage
+- [x] GPR dictionary mapping and calculate
+- [x] GPR index storage/export

@@ -63,7 +63,8 @@ def load_data(load_all: bool = False):
                 link VARCHAR,
                 category VARCHAR,
                 date_text VARCHAR,
-                published_date DATE
+                published_date DATE,
+                source VARCHAR
             )
         """)
         

@@ -13,6 +13,10 @@ wheels/
 data/raw/*.json
 data/gpr_index.db
 *.db
+data/dev/
+data/prod/
+!data/dev/.gitkeep
+!data/prod/.gitkeep
 
 # Logs
 logs/
@@ -22,3 +26,6 @@ dbt_project/logs/
 
 # Credentials
 config/credentials/*.json
+
+# Environments
+*.env
