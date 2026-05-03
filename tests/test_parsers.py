@@ -24,7 +24,7 @@ from src.scraper.parsers.kompas import KompasParser
 
 @pytest.fixture
 def antara():
-    return AntaraParser(base_url="http://fake-antara.com", headers={})
+    return AntaraParser()
 
 @pytest.fixture
 def kompas():

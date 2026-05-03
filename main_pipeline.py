@@ -48,7 +48,7 @@ def main():
     # Step 2: Extract (Web Scraping)
     # Fetches yesterday's news from Antara
     run_command(
-        command="uv run python src/main_scraper.py", 
+        command="uv run python src/scraper/main_scraper.py", 
         step_name="Data Extraction (Scraper)"
     )
     
