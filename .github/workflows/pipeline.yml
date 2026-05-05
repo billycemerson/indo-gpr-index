@@ -1,0 +1,102 @@
+name: Daily GPR Index Pipeline
+
+on:
+  schedule:
+    - cron: '0 1 * * *'       # 01:00 UTC = 08:00 WIB, runs on default branch (main) only
+  workflow_dispatch:            # manual trigger — works on any branch, useful for testing
+  push:
+    branches:
+      - main                   # run on every merge to main
+      - 'feature/ci*'          # run on feature/ci branches for testing before merge
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60        # hard stop — prevents runaway Playwright sessions
+
+    env:
+      APP_ENV: prod
+
+    steps:
+      # ------------------------------------------------------------------ #
+      #  1. Checkout                                                         #
+      # ------------------------------------------------------------------ #
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------ #
+      #  2. Python + uv                                                      #
+      # ------------------------------------------------------------------ #
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync
+
+      # ------------------------------------------------------------------ #
+      #  3. Playwright — cached so binaries don't re-download every run     #
+      # ------------------------------------------------------------------ #
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('uv.lock') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: uv run playwright install chromium --with-deps
+
+      # ------------------------------------------------------------------ #
+      #  4. Google Sheets credentials                                        #
+      #  Secret stored in: Settings → Secrets → Actions → GSHEET_KEY_JSON  #
+      #  Value: paste the entire contents of gsheet_key.json                #
+      # ------------------------------------------------------------------ #
+      - name: Write GSheet credentials
+        run: |
+          mkdir -p config/credentials
+          echo '${{ secrets.GSHEET_KEY_JSON }}' > config/credentials/gsheet_key.json
+
+      # ------------------------------------------------------------------ #
+      #  5. Pipeline steps — mirrors run_pipeline.py but runs directly      #
+      #     so each step is visible separately in the Actions UI             #
+      # ------------------------------------------------------------------ #
+      - name: Get target date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Step 1 — Unit tests
+        run: uv run pytest
+        env:
+          APP_ENV: dev           # tests always run against dev env
+
+      - name: Step 2 — Scrape
+        run: uv run python src/scraper/main_scraper.py
+
+      - name: Step 3 — Load to DuckDB
+        run: uv run python src/load_to_db.py
+
+      - name: Step 4 — dbt transform
+        run: cd dbt_project && uv run dbt run --profiles-dir .
+
+      - name: Step 5 — Export mart to GSheet
+        run: uv run python src/export_table.py
+
+      # ------------------------------------------------------------------ #
+      #  6. Artifacts                                                        #
+      #  Uploaded with if: always() so JSON is preserved even if a          #
+      #  later step (dbt, export) fails. Used to rebuild history locally.   #
+      # ------------------------------------------------------------------ #
+      - name: Upload raw JSON artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrape-${{ steps.date.outputs.date }}
+          path: data/prod/raw/
+          retention-days: 90
+          if-no-files-found: warn  # don't fail if scraper produced nothing
