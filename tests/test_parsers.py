@@ -93,7 +93,14 @@ class TestAntaraFetchNews:
     """
     fetch_news: full integration of _scrape_category + _stamp.
     Network call (requests.get) is mocked — no real HTTP.
+    time.sleep is patched at class level — no real delays.
     """
+
+    @pytest.fixture(autouse=True)
+    def no_sleep(self):
+        """Eliminates REQUEST_DELAY waits across all tests in this class."""
+        with patch("src.scraper.parsers.antara.time.sleep"):
+            yield
 
     def test_source_field_is_stamped(self, antara, antara_valid_html):
         mock_response = MagicMock()
@@ -113,7 +120,6 @@ class TestAntaraFetchNews:
         with patch("src.scraper.parsers.antara.requests.get", return_value=mock_response):
             results = antara.fetch_news("2025-01-01")
 
-        # Every article must have a category set to one of the configured values
         valid_categories = set(AntaraParser.CATEGORIES)
         assert all(a["category"] in valid_categories for a in results)
 
@@ -134,7 +140,6 @@ class TestAntaraFetchNews:
             "src.scraper.parsers.antara.requests.get",
             side_effect=req.exceptions.ConnectionError("timeout")
         ):
-            # Should not raise — errors are caught inside fetch_news
             results = antara.fetch_news("2025-01-01")
 
         assert isinstance(results, list)
@@ -196,7 +201,13 @@ class TestKompasSourceName:
 
 
 class TestKompasFetchNews:
-    """fetch_news: pagination + _stamp. Network mocked."""
+    """fetch_news: pagination + _stamp. Network mocked. time.sleep patched."""
+
+    @pytest.fixture(autouse=True)
+    def no_sleep(self):
+        """Eliminates REQUEST_DELAY waits across all tests in this class."""
+        with patch("src.scraper.parsers.kompas.time.sleep"):
+            yield
 
     def test_stops_pagination_on_empty_page(self, kompas, kompas_valid_html, kompas_empty_html):
         """Should stop looping when a page returns no articles."""
@@ -222,3 +233,174 @@ class TestKompasFetchNews:
                 results = kompas.fetch_news("2025-01-01")
 
         assert all(a["source"] == "kompas" for a in results)
+
+
+#  TempoParser
+
+# Tempo uses Playwright instead of requests.
+# Mock strategy: patch _render_page (the Playwright layer) directly.
+# This keeps tests fast and dependency-free — no browser needed in CI.
+
+@pytest.fixture
+def tempo():
+    from src.scraper.parsers.tempo import TempoParser
+    return TempoParser()
+
+
+class TestTempoParseIndexPage:
+    """_parse_index_page: rendered HTML string → list of article dicts."""
+
+    def test_extracts_title_link_category(self, tempo, tempo_valid_html):
+        results = tempo._parse_index_page(tempo_valid_html, "politik", "2026-05-01")
+
+        assert len(results) == 1
+        assert results[0]["title"] == "Unhas Ungkap Biaya Bangun Dapur MBG Mencapai Rp 2 Miliar"
+        assert results[0]["link"] == "https://www.tempo.co/politik/unhas-ungkap-biaya-bangun-dapur-mbg-2132971"
+        assert results[0]["category"] == "politik"
+        assert results[0]["date_text"] == "2026-05-01"
+
+    def test_prefers_data_mrf_link_over_href(self, tempo, tempo_valid_html):
+        """data-mrf-link is the full absolute URL — should be preferred over relative href."""
+        results = tempo._parse_index_page(tempo_valid_html, "politik", "2026-05-01")
+        assert results[0]["link"].startswith("https://www.tempo.co")
+
+    def test_falls_back_to_href_when_no_mrf_link(self, tempo):
+        html = """
+        <aside class="flex flex-row">
+            <figure class="contents">
+                <figcaption>
+                    <p><a href="/politik/artikel-tanpa-mrf">Artikel Tanpa MRF Link</a></p>
+                </figcaption>
+            </figure>
+        </aside>
+        """
+        results = tempo._parse_index_page(html, "politik", "2026-05-01")
+        assert results[0]["link"] == "https://www.tempo.co/politik/artikel-tanpa-mrf"
+
+    def test_returns_empty_on_no_asides(self, tempo, tempo_empty_html):
+        results = tempo._parse_index_page(tempo_empty_html, "politik", "2026-05-01")
+        assert results == []
+
+    def test_skips_aside_without_figcaption(self, tempo):
+        html = """<aside class="flex flex-row"><figure></figure></aside>"""
+        results = tempo._parse_index_page(html, "politik", "2026-05-01")
+        assert results == []
+
+    def test_skips_aside_without_link(self, tempo):
+        html = """
+        <aside class="flex flex-row">
+            <figure class="contents">
+                <figcaption><p>Teks tanpa link</p></figcaption>
+            </figure>
+        </aside>
+        """
+        results = tempo._parse_index_page(html, "politik", "2026-05-01")
+        assert results == []
+
+    def test_date_text_is_injected_from_target_date(self, tempo, tempo_valid_html):
+        """Tempo has no date in HTML — date_text must equal the passed target_date."""
+        results = tempo._parse_index_page(tempo_valid_html, "politik", "2026-05-01")
+        assert results[0]["date_text"] == "2026-05-01"
+
+    def test_parses_multiple_articles(self, tempo, tempo_multi_html):
+        results = tempo._parse_index_page(tempo_multi_html, "politik", "2026-05-01")
+        assert len(results) == 2
+
+
+class TestTempoGetTotalPages:
+    """_get_total_pages: reads max page count from pagination nav."""
+
+    def test_returns_max_page_from_nav(self, tempo, tempo_pagination_html):
+        assert tempo._get_total_pages(tempo_pagination_html) == 2
+
+    def test_returns_1_when_no_nav(self, tempo, tempo_valid_html):
+        """Single-page result has no nav — should default to 1."""
+        assert tempo._get_total_pages(tempo_valid_html) == 1
+
+    def test_returns_1_on_empty_html(self, tempo, tempo_empty_html):
+        assert tempo._get_total_pages(tempo_empty_html) == 1
+
+
+class TestTempoSourceName:
+    def test_source_name(self, tempo):
+        assert tempo.source_name == "tempo"
+
+
+class TestTempoFetchNews:
+    """
+    fetch_news: full flow with Playwright fully mocked.
+
+    Root cause of slow tests: patch.object(tempo, "_render_page") mocks the
+    method but sync_playwright() still launches a real Chromium process before
+    _render_page is ever called. Fix: mock sync_playwright itself so no browser
+    is started at all.
+
+    Pattern used in every test:
+        with patch("src.scraper.parsers.tempo.sync_playwright") as mock_pw:
+            mock_pw.return_value.__enter__.return_value = mock_playwright_instance
+            mock_playwright_instance.chromium.launch.return_value.new_context.return_value = mock_ctx
+            patch.object(tempo, "_render_page", ...)
+    """
+
+    @pytest.fixture
+    def mock_pw(self):
+        """
+        Shared fixture: fully mocked sync_playwright context manager.
+        No Chromium process is launched. Tests finish in milliseconds.
+        """
+        with patch("src.scraper.parsers.tempo.sync_playwright") as mock_sync_pw:
+            mock_instance   = MagicMock()
+            mock_browser    = MagicMock()
+            mock_ctx        = MagicMock()
+
+            mock_sync_pw.return_value.__enter__.return_value = mock_instance
+            mock_instance.chromium.launch.return_value      = mock_browser
+            mock_browser.new_context.return_value           = mock_ctx
+
+            yield mock_sync_pw
+
+    def test_source_field_is_stamped(self, tempo, mock_pw, tempo_valid_html):
+        with patch.object(tempo, "_render_page", return_value=tempo_valid_html):
+            results = tempo.fetch_news("2026-05-01")
+
+        assert all(a["source"] == "tempo" for a in results)
+
+    def test_all_categories_are_scraped(self, tempo, mock_pw, tempo_valid_html):
+        """fetch_news must iterate all CATEGORIES — each returns at least 1 article."""
+        with patch.object(tempo, "_render_page", return_value=tempo_valid_html):
+            results = tempo.fetch_news("2026-05-01")
+
+        assert {a["category"] for a in results} == set(tempo.CATEGORIES)
+
+    def test_pagination_respects_total_pages(self, tempo, mock_pw, tempo_pagination_html, tempo_valid_html):
+        """page 1 has 2-page nav → _render_page called twice per category."""
+        responses = [tempo_pagination_html, tempo_valid_html] * len(tempo.CATEGORIES)
+
+        with patch.object(tempo, "_render_page", side_effect=responses):
+            with patch("src.scraper.parsers.tempo.time.sleep"):
+                results = tempo.fetch_news("2026-05-01")
+
+        assert len(results) >= len(tempo.CATEGORIES) * 2
+
+    def test_returns_empty_list_when_render_fails(self, tempo, mock_pw):
+        """_render_page returning None must not crash — return empty list."""
+        with patch.object(tempo, "_render_page", return_value=None):
+            results = tempo.fetch_news("2026-05-01")
+
+        assert results == []
+
+    def test_category_error_does_not_stop_other_categories(self, tempo, mock_pw, tempo_valid_html):
+        """Exception in one category must not prevent remaining categories."""
+        call_count = 0
+
+        def side_effect(ctx, url):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception("Simulated network error")
+            return tempo_valid_html
+
+        with patch.object(tempo, "_render_page", side_effect=side_effect):
+            results = tempo.fetch_news("2026-05-01")
+
+        assert len(results) > 0
