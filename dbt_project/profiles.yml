@@ -1,0 +1,26 @@
+# This profile name must match the one in dbt_project.yml
+dbt_project:
+  target: prod
+  outputs:
+    dev:
+      type: duckdb
+      
+      # Relative path to the database created by your Python script.
+      # Since dbt will be run from within the dbt_project/ folder,
+      # the path goes back one step (../) to the data/ folder.
+      path: "../data/dev/gpr_index.db"
+      
+      # IMPORTANT FOR 2GB RAM: 
+      # Limit threads to 1 or 2 to avoid overloading the CPU/RAM.
+      threads: 2
+      
+      # Optional but recommended:
+      # Ensure DuckDB uses a safe read/write connection mode
+      # without locking the file if it's being accessed by another app (optional).
+      # read_only: false
+
+    # You can add a 'prod' target later if deploying to the cloud
+    prod:
+      type: duckdb
+      path: "../data/prod/gpr_index.db"
+      threads: 4

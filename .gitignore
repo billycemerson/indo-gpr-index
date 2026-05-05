@@ -1,0 +1,31 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Data and database files
+data/raw/*.json
+data/gpr_index.db
+*.db
+data/dev/
+data/prod/
+!data/dev/.gitkeep
+!data/prod/.gitkeep
+
+# Logs
+logs/
+dbt_project/target/
+dbt_project/dbt_packages/
+dbt_project/logs/
+
+# Credentials
+config/credentials/*.json
+
+# Environments
+*.env
