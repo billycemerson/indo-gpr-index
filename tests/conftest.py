@@ -101,3 +101,76 @@ def sample_articles_with_duplicate(sample_articles):
     """Same list with an extra duplicate link — to test dedup logic."""
     duplicate = sample_articles[0].copy()
     return sample_articles + [duplicate]
+
+@pytest.fixture
+def tempo_valid_html():
+    """Single valid Tempo article — rendered HTML after Playwright JS execution."""
+    return """
+    <aside class="flex flex-row gap-3 py-4 container">
+        <figure class="contents">
+            <a href="/politik/unhas-ungkap-biaya-bangun-dapur-mbg-2132971"
+               data-mrf-link="https://www.tempo.co/politik/unhas-ungkap-biaya-bangun-dapur-mbg-2132971">
+                <img src="thumb.jpg">
+            </a>
+            <figcaption>
+                <p class="text-neutral-1200">
+                    <a href="/politik/unhas-ungkap-biaya-bangun-dapur-mbg-2132971"
+                       data-mrf-link="https://www.tempo.co/politik/unhas-ungkap-biaya-bangun-dapur-mbg-2132971">
+                        Unhas Ungkap Biaya Bangun Dapur MBG Mencapai Rp 2 Miliar
+                    </a>
+                </p>
+            </figcaption>
+        </figure>
+    </aside>
+    """
+
+@pytest.fixture
+def tempo_multi_html():
+    """Multiple Tempo articles on one page."""
+    return """
+    <aside class="flex flex-row gap-3 py-4 container">
+        <figure class="contents">
+            <figcaption>
+                <p><a href="/politik/artikel-satu"
+                      data-mrf-link="https://www.tempo.co/politik/artikel-satu">
+                    Artikel Politik Satu
+                </a></p>
+            </figcaption>
+        </figure>
+    </aside>
+    <aside class="flex flex-row gap-3 py-4 container">
+        <figure class="contents">
+            <figcaption>
+                <p><a href="/hukum/artikel-dua"
+                      data-mrf-link="https://www.tempo.co/hukum/artikel-dua">
+                    Artikel Hukum Dua
+                </a></p>
+            </figcaption>
+        </figure>
+    </aside>
+    """
+
+@pytest.fixture
+def tempo_empty_html():
+    """HTML with no aside.flex — simulates no articles found."""
+    return "<div>Tidak ada artikel ditemukan</div>"
+
+@pytest.fixture
+def tempo_pagination_html():
+    """HTML with pagination nav showing 2 pages."""
+    return """
+    <aside class="flex flex-row gap-3">
+        <figure class="contents">
+            <figcaption>
+                <p><a href="/politik/artikel"
+                      data-mrf-link="https://www.tempo.co/politik/artikel">
+                    Artikel Dengan Paginasi
+                </a></p>
+            </figcaption>
+        </figure>
+    </aside>
+    <nav>
+        <button data-type="page" value="1">1</button>
+        <button data-type="page" value="2">2</button>
+    </nav>
+    """
