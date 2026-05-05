@@ -43,6 +43,19 @@ def process_single_file(json_path: Path, con) -> None:
     # Stamp the dataframe with the immutable date
     df_new['published_date'] = published_date
 
+    # Dedup guard: filter out links already loaded for this data
+    # Prevents duplicate row ip pipeline re-runs on the same day
+    existing = con.execute(
+        "SELECT link FROM raw_news WHERE published_date = ?", [published_date]
+    ).fetchdf()
+
+    if not existing.empty:
+        df_new = df_new[~df_new["link"].isin(existing["link"])]
+
+    if df_new.empty:
+        print(f"All rows for {published_date} alrady loaded. Skipping")
+        return
+
     # Append: Insert the data mapping columns by name to avoid order mismatch
     con.execute("INSERT INTO raw_news BY NAME SELECT * FROM df_new")
     print(f"Successfully appended {len(df_new)} rows stamped as {published_date}.")

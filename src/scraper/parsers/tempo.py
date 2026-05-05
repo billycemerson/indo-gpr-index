@@ -124,16 +124,32 @@ class TempoParser(BaseParser):
 
     def _render_page(self, ctx, url: str) -> str | None:
         """
-        Opens URL in a new Playwright page, waits for articles to render,
-        returns full HTML. Returns None on timeout or error.
+        Opens URL in a new Playwright page and returns rendered HTML.
+
+        Strategy: wait for the page container first (always present),
+        then do a short optional wait for articles. If no articles appear
+        within the short window, return the HTML anyway so _parse_index_page
+        can return [] cleanly — instead of raising a timeout error.
+
+        Returns None only on hard failures (navigation error, crash).
         """
         page = ctx.new_page()
         try:
             page.goto(url, timeout=30000)
-            page.wait_for_selector("aside.flex", timeout=15000)
+
+            # Wait for the page shell — always present even when 0 articles
+            page.wait_for_selector("nav", timeout=15000)
+
+            # Short grace period for articles to hydrate
+            try:
+                page.wait_for_selector("aside.flex", timeout=3000)
+            except PlaywrightTimeoutError:
+                # No articles found — valid empty result, not an error
+                print(f"  [Tempo] No articles found (empty category or date): {url}")
+
             return page.content()
         except PlaywrightTimeoutError:
-            print(f"  [Tempo] Timeout waiting for articles at: {url}")
+            print(f"  [Tempo] Timeout loading page: {url}")
             return None
         except Exception as exc:
             print(f"  [Tempo] Error rendering page: {exc}")

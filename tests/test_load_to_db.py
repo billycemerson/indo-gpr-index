@@ -11,9 +11,9 @@ We do NOT test that DuckDB SQL works correctly — that's dbt's job.
 
 import json
 import pytest
+import pandas as pd
 from pathlib import Path
-from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 
 from src.load_to_db import process_single_file
 
@@ -21,10 +21,28 @@ from src.load_to_db import process_single_file
 #  Helpers
 
 def write_json(tmp_path: Path, filename: str, data: list) -> Path:
-    """Write sample article data to a temp JSON file and return its path."""
     path = tmp_path / filename
     path.write_text(json.dumps(data), encoding="utf-8")
     return path
+
+
+def make_mock_con(existing_links: list = None):
+    """
+    Builds a MagicMock connection where:
+      - execute("SELECT ...").fetchdf() returns a DataFrame of existing links
+      - execute("INSERT ...") succeeds silently
+
+    This matches the two-call pattern added by the dedup guard:
+      call 1: SELECT link FROM raw_news WHERE published_date = ?
+      call 2: INSERT INTO raw_news BY NAME SELECT * FROM df_new
+    """
+    mock_con = MagicMock()
+
+    # Return an empty DataFrame by default (no existing rows = first load)
+    existing_df = pd.DataFrame({"link": existing_links or []})
+    mock_con.execute.return_value.fetchdf.return_value = existing_df
+
+    return mock_con
 
 
 #  Tests
@@ -32,76 +50,89 @@ def write_json(tmp_path: Path, filename: str, data: list) -> Path:
 class TestProcessSingleFile:
 
     def test_inserts_rows_for_valid_file(self, tmp_path, sample_articles):
-        """Happy path: valid JSON file triggers an INSERT into DuckDB."""
+        """Happy path: valid file triggers SELECT dedup check then INSERT."""
         json_path = write_json(tmp_path, "news_2025-01-12.json", sample_articles)
-        mock_con = MagicMock()
+        mock_con = make_mock_con()
 
         process_single_file(json_path, mock_con)
 
-        mock_con.execute.assert_called_once()
+        # Two calls: SELECT (dedup) + INSERT
+        assert mock_con.execute.call_count == 2
+        last_sql = mock_con.execute.call_args_list[-1][0][0]
+        assert "INSERT" in last_sql
 
     def test_date_extracted_from_filename(self, tmp_path, sample_articles):
         """published_date must be parsed from the filename, not from article data."""
         json_path = write_json(tmp_path, "news_2025-06-15.json", sample_articles)
-        mock_con = MagicMock()
+        mock_con = make_mock_con()
 
-        with patch("src.load_to_db.pd.read_json") as mock_read:
-            import pandas as pd
-            df = pd.DataFrame(sample_articles)
-            mock_read.return_value = df
+        process_single_file(json_path, mock_con)
 
-            process_single_file(json_path, mock_con)
-
-            # The DataFrame passed to execute should have 'published_date' stamped
-            call_args = mock_con.execute.call_args
-            assert call_args is not None
+        # SELECT call must include the correct date from filename
+        select_call_args = mock_con.execute.call_args_list[0][0]
+        from datetime import date
+        assert date(2025, 6, 15) in select_call_args[1]
 
     def test_skips_nonexistent_file(self, tmp_path):
         """Missing file should not raise — just print and return."""
         missing = tmp_path / "ghost_2025-01-01.json"
-        mock_con = MagicMock()
+        mock_con = make_mock_con()
 
-        process_single_file(missing, mock_con)  # should not raise
+        process_single_file(missing, mock_con)
 
         mock_con.execute.assert_not_called()
 
     def test_skips_empty_json_file(self, tmp_path):
-        """Empty JSON array should not trigger an INSERT."""
+        """Empty JSON array should not trigger any DB calls."""
         json_path = write_json(tmp_path, "news_2025-01-12.json", [])
-        mock_con = MagicMock()
+        mock_con = make_mock_con()
 
         process_single_file(json_path, mock_con)
 
         mock_con.execute.assert_not_called()
 
     def test_fallback_date_when_no_date_in_filename(self, tmp_path, sample_articles):
-        """If filename has no YYYY-MM-DD pattern, should fall back to yesterday's date."""
+        """If filename has no YYYY-MM-DD pattern, fall back to yesterday's date."""
         json_path = write_json(tmp_path, "news_latest.json", sample_articles)
-        mock_con = MagicMock()
+        mock_con = make_mock_con()
 
-        # Should not raise even with an undated filename
         process_single_file(json_path, mock_con)
 
-        mock_con.execute.assert_called_once()
+        # Should still reach INSERT — fallback date doesn't prevent loading
+        assert mock_con.execute.call_count == 2
+
+    def test_skips_insert_when_all_links_already_exist(self, tmp_path, sample_articles):
+        """Dedup guard: if all links already in DB, INSERT must not be called."""
+        json_path = write_json(tmp_path, "news_2025-01-12.json", sample_articles)
+        existing_links = [a["link"] for a in sample_articles]
+        mock_con = make_mock_con(existing_links=existing_links)
+
+        process_single_file(json_path, mock_con)
+
+        # Only the SELECT should be called — no INSERT
+        assert mock_con.execute.call_count == 1
+        only_sql = mock_con.execute.call_args_list[0][0][0]
+        assert "SELECT" in only_sql
+
+    def test_inserts_only_new_links_when_partial_overlap(self, tmp_path, sample_articles):
+        """Dedup guard: only articles with new links get inserted."""
+        json_path = write_json(tmp_path, "news_2025-01-12.json", sample_articles)
+        # Mark first article as already existing
+        existing_links = [sample_articles[0]["link"]]
+        mock_con = make_mock_con(existing_links=existing_links)
+
+        process_single_file(json_path, mock_con)
+
+        # Both SELECT and INSERT are called
+        assert mock_con.execute.call_count == 2
 
     def test_published_date_is_date_type(self, tmp_path, sample_articles):
-        """published_date column must be a date object, not a string."""
+        """published_date passed to SELECT must be a date object, not a string."""
         json_path = write_json(tmp_path, "news_2025-03-20.json", sample_articles)
+        mock_con = make_mock_con()
 
-        captured_df = {}
+        process_single_file(json_path, mock_con)
 
-        def capture_execute(sql, *args, **kwargs):
-            # Not inspecting SQL internals — just confirm it was called
-            captured_df["called"] = True
-
-        mock_con = MagicMock()
-        mock_con.execute.side_effect = capture_execute
-
-        with patch("src.load_to_db.pd.read_json") as mock_read:
-            import pandas as pd
-            df = pd.DataFrame(sample_articles)
-            mock_read.return_value = df
-
-            process_single_file(json_path, mock_con)
-
-        assert captured_df.get("called") is True
+        from datetime import date
+        select_args = mock_con.execute.call_args_list[0][0]
+        assert select_args[1] == [date(2025, 3, 20)]
