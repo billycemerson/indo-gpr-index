@@ -58,22 +58,7 @@ git add data/
 
 ---
 
-### 3. Fix `run_pipeline.py` scraper path
-
-The current path is wrong — update before merging:
-
-```python
-# run_pipeline.py — Step 2
-# WRONG
-command="uv run python src/main_scraper.py"
-
-# RIGHT
-command="uv run python src/scraper/main_scraper.py"
-```
-
----
-
-### 4. Branch flow for testing CI
+### 3. Branch flow for testing CI
 
 ```bash
 git checkout dev
@@ -93,7 +78,7 @@ git push origin feature/ci
 
 ---
 
-### 5. Verify the run worked
+### 4. Verify the run worked
 
 After a successful run check:
 - **Actions tab** → scrape artifact appears with JSON files inside
@@ -102,7 +87,7 @@ After a successful run check:
 
 ---
 
-### 6. Rebuild full local history from artifacts
+### 5. Rebuild full local history from artifacts
 
 If you need to rebuild DuckDB locally from all CI runs:
 
