@@ -2,7 +2,7 @@
 parsers/tempo.py
 ================
 Parser for Tempo.co Indeks.
-Target: https://www.tempo.co/indeks?rubric_slug=politik&access=FREE&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+Target: https://www.tempo.co/indeks?rubric_slug=politik&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
         page=N appended only for page > 1
 
 Tempo uses Nuxt.js (CSR) — Playwright required for rendered DOM.
@@ -161,7 +161,6 @@ class TempoParser(BaseParser):
         url = (
             f"{self.BASE_URL}"
             f"?rubric_slug={category}"
-            f"&access=FREE"
             f"&start_date={target_date}"
             f"&end_date={target_date}"
         )

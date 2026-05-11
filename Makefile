@@ -7,7 +7,7 @@ test:
 
 # Execute the scraper
 scrape:
-	uv run python src/main_scraper.py
+	uv run python src/scraper/main_scraper.py
 
 # Load scraped JSON into DuckDB
 load:
