@@ -1,204 +1,184 @@
 """
 parsers/tempo.py
 ================
-Parser for Tempo.co Indeks.
-Target: https://www.tempo.co/indeks?rubric_slug=politik&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
-        page=N appended only for page > 1
+Parser for Tempo.co using HTML sitemap tables.
+Targets: 
+  - https://www.tempo.co/politik-sitemap.xml
+  - https://www.tempo.co/hukum-sitemap.xml
+  - https://www.tempo.co/ekonomi-sitemap.xml
+  - https://www.tempo.co/internasional-sitemap.xml
 
-Tempo uses Nuxt.js (CSR) — Playwright required for rendered DOM.
+Each sitemap contains an HTML table with structure:
+  <table id="sitemap">
+    <tbody>
+      <tr>
+        <td><a href="[article_url]">[url]</a></td>
+        <td>0</td>
+        <td>2026-05-19 20:37 Z</td>
+      </tr>
+    </tbody>
+  </table>
 
-Pagination strategy:
-  - Fetch page 1 first
-  - Read total page count from <button data-type="page"> in the nav
-  - Loop only up to that count — avoids infinite loop when Tempo returns
-    stale data for out-of-range page numbers
-
-Install once:
-    pip install playwright
-    playwright install chromium
+This approach completely avoids blocking, pagination, and Playwright.
 """
 
-import time
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+import requests
 from bs4 import BeautifulSoup
-
+from datetime import datetime
 from src.scraper.base_parser import BaseParser
 
 
 class TempoParser(BaseParser):
-
-    BASE_URL      = "https://www.tempo.co/indeks"
-    CATEGORIES    = ["politik", "hukum", "ekonomi", "internasional"]
-    REQUEST_DELAY = 2
-
-    #  BaseParser contract
-
+    
+    # Category-specific sitemap URLs (HTML format)
+    SITEMAPS = {
+        "politik": "https://www.tempo.co/politik-sitemap.xml",
+        "hukum": "https://www.tempo.co/hukum-sitemap.xml",
+        "ekonomi": "https://www.tempo.co/ekonomi-sitemap.xml",
+        "internasional": "https://www.tempo.co/internasional-sitemap.xml",
+    }
+    
     @property
     def source_name(self) -> str:
         return "tempo"
-
+    
     def fetch_news(self, target_date: str) -> list[dict]:
+        """
+        Fetch articles by parsing HTML sitemap tables.
+        target_date format: YYYY-MM-DD
+        """
         all_articles = []
-
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"]  # required on Linux CI
-            )
-            ctx = browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                )
-            )
-
-            for category in self.CATEGORIES:
-                print(f"  [Tempo] Processing category: {category}")
-                try:
-                    articles = self._scrape_category(ctx, category, target_date)
-                    all_articles.extend(articles)
-                    print(f"  [Tempo] Fetched {len(articles)} articles from '{category}'")
-                except Exception as exc:
-                    print(f"  [Tempo] Error scraping '{category}': {exc}")
-
-            browser.close()
-
-        return self._stamp(all_articles)
-
-    #  Internal helpers
-
-    def _scrape_category(self, ctx, category: str, target_date: str) -> list[dict]:
-        """
-        Fetches page 1 first to determine total page count,
-        then iterates only up to that number.
-        """
-        results = []
-
-        # --- Page 1: fetch + detect total pages ---
-        url_p1 = self._build_url(category, target_date, 1)
-        print(f"  [Tempo] Fetching: {url_p1}")
-
-        html = self._render_page(ctx, url_p1)
-        if html is None:
-            return results
-
-        total_pages = self._get_total_pages(html)
-        print(f"  [Tempo] Total pages for '{category}': {total_pages}")
-
-        articles = self._parse_index_page(html, category, target_date)
-        results.extend(articles)
-
-        # --- Page 2..N ---
-        for page_num in range(2, total_pages + 1):
-            time.sleep(self.REQUEST_DELAY)
-            url = self._build_url(category, target_date, page_num)
-            print(f"  [Tempo] Fetching: {url}")
-
-            html = self._render_page(ctx, url)
-            if html is None:
-                break
-
-            articles = self._parse_index_page(html, category, target_date)
-            results.extend(articles)
-
-        return results
-
-    def _get_total_pages(self, html: str) -> int:
-        """
-        Reads max page number from the pagination nav.
-
-        Looks for: <button data-type="page" value="N">N</button>
-        Returns 1 if nav is absent (single-page result).
-        """
-        soup         = BeautifulSoup(html, "html.parser")
-        page_buttons = soup.select('button[data-type="page"]')
-
-        if not page_buttons:
-            return 1
-
-        try:
-            return max(int(b["value"]) for b in page_buttons)
-        except (KeyError, ValueError):
-            return 1
-
-    def _render_page(self, ctx, url: str) -> str | None:
-        """
-        Opens URL in a new Playwright page and returns rendered HTML.
-
-        Strategy: wait for the page container first (always present),
-        then do a short optional wait for articles. If no articles appear
-        within the short window, return the HTML anyway so _parse_index_page
-        can return [] cleanly — instead of raising a timeout error.
-
-        Returns None only on hard failures (navigation error, crash).
-        """
-        page = ctx.new_page()
-        try:
-            page.goto(url, timeout=30000)
-
-            # Wait for the page shell — always present even when 0 articles
-            page.wait_for_selector("nav", timeout=15000)
-
-            # Short grace period for articles to hydrate
+        
+        for category, sitemap_url in self.SITEMAPS.items():
+            print(f"  [Tempo] Processing {category} sitemap: {sitemap_url}")
+            
             try:
-                page.wait_for_selector("aside.flex", timeout=3000)
-            except PlaywrightTimeoutError:
-                # No articles found — valid empty result, not an error
-                print(f"  [Tempo] No articles found (empty category or date): {url}")
-
-            return page.content()
-        except PlaywrightTimeoutError:
-            print(f"  [Tempo] Timeout loading page: {url}")
-            return None
-        except Exception as exc:
-            print(f"  [Tempo] Error rendering page: {exc}")
-            return None
-        finally:
-            page.close()
-
-    def _build_url(self, category: str, target_date: str, page: int) -> str:
-        url = (
-            f"{self.BASE_URL}"
-            f"?rubric_slug={category}"
-            f"&start_date={target_date}"
-            f"&end_date={target_date}"
-        )
-        if page > 1:
-            url += f"&page={page}"
-        return url
-
-    def _parse_index_page(self, html: str, category: str, target_date: str) -> list[dict]:
+                articles = self._scrape_sitemap(sitemap_url, category, target_date)
+                all_articles.extend(articles)
+                print(f"  [Tempo] Found {len(articles)} articles from {category} on {target_date}")
+            except Exception as exc:
+                print(f"  [Tempo] Error scraping {category} sitemap: {exc}")
+        
+        print(f"  [Tempo] Total articles for {target_date}: {len(all_articles)}")
+        return self._stamp(all_articles)
+    
+    def _scrape_sitemap(self, sitemap_url: str, category: str, target_date: str) -> list[dict]:
         """
-        Parses rendered HTML. Date injected from target_date —
-        Tempo articles have no date element in the DOM.
+        Scrape raw XML sitemap and filter by target date.
         """
-        soup     = BeautifulSoup(html, "html.parser")
         articles = []
-
-        for aside in soup.select("aside.flex"):
-            figcaption = aside.find("figcaption")
-            if not figcaption:
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        try:
+            # Use response.content for XML parsing, which is safer than .text
+            response = requests.get(sitemap_url, headers=headers, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            print(f"    [Tempo] Failed to fetch {sitemap_url}: {e}")
+            return articles
+        
+        # Parse using lxml as XML (not HTML)
+        soup = BeautifulSoup(response.content, 'xml')
+        
+        # Find all <url> elements
+        urls = soup.find_all('url')
+        
+        if not urls:
+            print(f"    [Tempo] No <url> tags found in {sitemap_url}")
+            return articles
+        
+        for url_node in urls:
+            # Extract <loc> (URL) and <lastmod> (Date) tags
+            loc_tag = url_node.find('loc')
+            lastmod_tag = url_node.find('lastmod')
+            
+            if not loc_tag or not loc_tag.text:
                 continue
-
-            title_tag = figcaption.find("a", href=True)
-            if not title_tag:
+                
+            article_url = loc_tag.text.strip()
+            date_str = lastmod_tag.text.strip() if lastmod_tag else ""
+            
+            # Format the date
+            article_date = self._extract_date_from_string(date_str)
+            
+            # Filter based on the target date
+            if article_date != target_date:
                 continue
-
-            title = title_tag.get_text(strip=True)
-            if not title:
-                continue
-
-            link = (
-                title_tag.get("data-mrf-link")
-                or f"https://www.tempo.co{title_tag['href']}"
-            )
-
+            
+            # Check if Google News sitemap provides <news:title>
+            news_title = url_node.find('news:title')
+            if news_title and news_title.text:
+                title = news_title.text.strip()
+            else:
+                # If not available, extract the title directly from the URL slug
+                title = self._extract_title(article_url)
+                
             articles.append({
-                "title":     title,
-                "link":      link,
-                "category":  category,
-                "date_text": target_date,
+                "title": title,
+                "link": article_url,
+                "category": category,
+                "date_text": article_date,
             })
-
+            
         return articles
+
+    def _extract_title(self, article_url: str) -> str:
+        """
+        Extract title from URL slug because standard XML sitemaps lack title tags.
+        """
+        import re
+        
+        # Extract the last part of the URL path (e.g., /politik/.../article-title-1234567)
+        url_path = article_url.split('?')[0]
+        slug = url_path.rstrip('/').split('/')[-1]
+        
+        # Remove trailing numeric IDs if present (e.g., "-123456") and ".html" extensions
+        slug = re.sub(r'-\d+$', '', slug)
+        slug = slug.replace('.html', '')
+        
+        # Replace hyphens with spaces and capitalize
+        title = slug.replace('-', ' ').title()
+        return title
+    
+    def _extract_date_from_string(self, date_str: str) -> str:
+        """
+        Convert date string from sitemap to YYYY-MM-DD format.
+        
+        Examples:
+        - "2026-05-18T21:30:01Z" -> "2026-05-18"
+        - "2026-05-19 20:37 Z" -> "2026-05-19"
+        """
+        date_str = date_str.strip()
+        
+        # Try standard YYYY-MM-DD format (with optional time separated by space)
+        if ' ' in date_str:
+            date_part = date_str.split(' ')[0]
+            if len(date_part) == 10 and date_part[4] == '-' and date_part[7] == '-':
+                return date_part
+        
+        # Try to parse with datetime, including the XML 'T' and 'Z' format
+        for fmt in [
+            '%Y-%m-%dT%H:%M:%SZ',
+            '%Y-%m-%dT%H:%M:%S%z',
+            '%Y-%m-%d %H:%M %Z', 
+            '%Y-%m-%d', 
+            '%d %B %Y', 
+            '%B %d, %Y'
+        ]:
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                return dt.strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+        
+        # If all else fails, try to extract YYYY-MM-DD pattern using Regex
+        import re
+        match = re.search(r'(\d{4})-(\d{2})-(\d{2})', date_str)
+        if match:
+            return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+        
+        print(f"    [Tempo] Warning: Could not parse date: {date_str}")
+        return date_str  # Return as-is
