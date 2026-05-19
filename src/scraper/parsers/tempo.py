@@ -28,7 +28,7 @@ from src.scraper.base_parser import BaseParser
 class TempoParser(BaseParser):
 
     BASE_URL      = "https://www.tempo.co/indeks"
-    CATEGORIES    = ["politik", "hukum", "ekonomi"]
+    CATEGORIES    = ["politik", "hukum", "ekonomi", "internasional"]
     REQUEST_DELAY = 2
 
     #  BaseParser contract
