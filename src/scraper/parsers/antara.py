@@ -17,7 +17,7 @@ from src.scraper.base_parser import BaseParser
 
 class AntaraParser(BaseParser):
 
-    CATEGORIES = ["politik", "ekonomi", "hukum"]
+    CATEGORIES = ["politik", "ekonomi", "hukum", "dunia"]
     MAX_PAGES = 10
     REQUEST_DELAY = 1  # seconds between page requests
 
