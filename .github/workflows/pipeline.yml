@@ -41,16 +41,16 @@ jobs:
       # ------------------------------------------------------------------ #
       #  3. Playwright — cached so binaries don't re-download every run     #
       # ------------------------------------------------------------------ #
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ hashFiles('uv.lock') }}
+      # - name: Cache Playwright browsers
+      #   uses: actions/cache@v4
+      #   id: playwright-cache
+      #   with:
+      #     path: ~/.cache/ms-playwright
+      #     key: playwright-chromium-${{ hashFiles('uv.lock') }}
 
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: uv run playwright install chromium --with-deps
+      # - name: Install Playwright browsers
+      #   if: steps.playwright-cache.outputs.cache-hit != 'true'
+      #   run: uv run playwright install chromium --with-deps
 
       # ------------------------------------------------------------------ #
       #  4. Google Sheets credentials                                        #
