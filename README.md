@@ -26,9 +26,11 @@ Export → Google Sheets
 
 | Source | Type | Categories | Method |
 |--------|------|------------|--------|
-| Antara | State agency | politik, ekonomi, hukum | requests |
-| Kompas | Mainstream | nasional | requests |
-| Tempo | Independent | politik, hukum, ekonomi | Playwright (JS-rendered) |
+| Antara | State agency | politik, ekonomi, hukum, dunia | requests |
+| Detik | Mainstream | internasional, bbc | requests |
+| Kompas | Mainstream | nasional, global | requests |
+| Tempo | Independent | politik, hukum, ekonomi, internasional | requests |
+| Tribunnews | Mainstream | nasional, internasional | requests |
 
 ---
 
@@ -100,14 +102,11 @@ git clone https://github.com/billycemerson/indo-gpr-index.git
 cd indo-gpr-index
 uv sync
 
-# 2. Install Playwright browser (for Tempo parser)
-uv run playwright install chromium
-
-# 3. Add credentials
+# 2. Add credentials
 cp config/credentials/gsheet_key.json.example config/credentials/gsheet_key.json
 # paste your Google service account key
 
-# 4. Set environment
+# 3. Set environment
 echo "APP_ENV=dev" > config/.env
 ```
 
@@ -134,7 +133,7 @@ uv run python src/export_table.py                      # export
 
 ## Adding a New Source
 
-See [CONTRIBUTING.md](./CONTRIBUTTING.md) for the full guide.
+See [CONTRIBUTTING.md](./CONTRIBUTTING.md) for the full guide.
 
 Short version: create `src/scraper/parsers/<media>.py` inheriting `BaseParser`, register in `parsers/__init__.py` and `build_parsers()`, add tests to `tests/test_parsers.py`.
 
