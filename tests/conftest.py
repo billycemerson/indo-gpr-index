@@ -14,7 +14,7 @@ import pytest
 
 @pytest.fixture
 def antara_valid_html():
-    """Single valid Antara article row."""
+    """Antara article with relative date (newer articles)"""
     return """
     <div class="row">
         <h2 class="post_title">
@@ -27,28 +27,53 @@ def antara_valid_html():
     """
 
 @pytest.fixture
-def antara_multi_html():
-    """Multiple Antara rows — yesterday + today + older, to test filtering."""
+def antara_valid_html_absolute():
+    """Antara article with absolute date (older articles)"""
     return """
     <div class="row">
         <h2 class="post_title">
-            <a href="https://antaranews.com/news/1/artikel-kemarin">Artikel Kemarin</a>
+            <a href="https://www.antaranews.com/news/123/berita-politik">
+                Berita Politik Penting
+            </a>
         </h2>
-        <span class="text-secondary">kemarin</span>
+        <span class="text-secondary">18 Mei 2026 10:30</span>
     </div>
+    """
+
+@pytest.fixture
+def antara_multi_html():
+    """Multiple Antara rows with mix of relative and absolute dates"""
+    return """
     <div class="row">
         <h2 class="post_title">
-            <a href="https://antaranews.com/news/2/artikel-hari-ini">Artikel Hari Ini</a>
+            <a href="https://antaranews.com/news/1/artikel-today">Artikel Hari Ini</a>
         </h2>
         <span class="text-secondary">30 menit lalu</span>
     </div>
     <div class="row">
         <h2 class="post_title">
-            <a href="https://antaranews.com/news/3/artikel-lama">Artikel Lama</a>
+            <a href="https://antaranews.com/news/2/artikel-yesterday">Artikel Kemarin</a>
         </h2>
-        <span class="text-secondary">12 Januari 2025</span>
+        <span class="text-secondary">kemarin</span>
+    </div>
+    <div class="row">
+        <h2 class="post_title">
+            <a href="https://antaranews.com/news/3/artikel-absolute">Artikel 15 Mei 2026</a>
+        </h2>
+        <span class="text-secondary">15 Mei 2026</span>
+    </div>
+    <div class="row">
+        <h2 class="post_title">
+            <a href="https://antaranews.com/news/4/artikel-absolute-lama">Artikel 10 Mei 2026</a>
+        </h2>
+        <span class="text-secondary">10 Mei 2026</span>
     </div>
     """
+
+@pytest.fixture
+def antara_multi_html_with_absolute(antara_multi_html):
+    """Alias for fetch_news tests that need mixed relative and absolute dates."""
+    return antara_multi_html
 
 @pytest.fixture
 def antara_empty_html():
@@ -355,3 +380,91 @@ def tribunnews_no_link_html():
         <time class="grey">Jumat, 15 Mei 2026 14:30 WIB</time>
     </li>
     """
+
+@pytest.fixture
+def tempo_sitemap_html():
+    """Tempo politik sitemap XML (politik-sitemap.xml)"""
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.tempo.co/politik/artikel-politik-1</loc>
+    <lastmod>2026-05-19T20:37:00Z</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tempo.co/politik/artikel-politik-2</loc>
+    <lastmod>2026-05-19T15:30:00Z</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tempo.co/politik/artikel-politik-3</loc>
+    <lastmod>2026-05-18T10:15:00Z</lastmod>
+  </url>
+</urlset>"""
+
+@pytest.fixture
+def tempo_sitemap_politik_filter_html():
+    """Politik sitemap XML with mixed dates for date-filter tests."""
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.tempo.co/politik/berita-politik</loc>
+    <lastmod>2026-05-20T09:00:00Z</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tempo.co/politik/berita-politik-lama</loc>
+    <lastmod>2026-05-19T14:20:00Z</lastmod>
+  </url>
+  <url>
+    <loc>https://www.tempo.co/politik/berita-politik-older</loc>
+    <lastmod>2026-05-18T14:20:00Z</lastmod>
+  </url>
+</urlset>"""
+
+@pytest.fixture
+def tempo_sitemap_hukum_filter_html():
+    """Hukum sitemap XML for date-filter tests."""
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.tempo.co/hukum/berita-hukum</loc>
+    <lastmod>2026-05-19T11:45:00Z</lastmod>
+  </url>
+</urlset>"""
+
+@pytest.fixture
+def tempo_sitemap_multi_html():
+    """Per-category sitemap XML snippets for fetch_news integration tests."""
+    return {
+        "politik": """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.tempo.co/politik/berita-politik-lama</loc>
+    <lastmod>2026-05-19T14:20:00Z</lastmod>
+  </url>
+</urlset>""",
+        "hukum": """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.tempo.co/hukum/berita-hukum</loc>
+    <lastmod>2026-05-19T11:45:00Z</lastmod>
+  </url>
+</urlset>""",
+        "ekonomi": """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.tempo.co/ekonomi/berita-ekonomi</loc>
+    <lastmod>2026-05-19T08:30:00Z</lastmod>
+  </url>
+</urlset>""",
+        "internasional": """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.tempo.co/internasional/berita-internasional</loc>
+    <lastmod>2026-05-19T12:00:00Z</lastmod>
+  </url>
+</urlset>""",
+    }
+
+@pytest.fixture
+def tempo_sitemap_empty_html():
+    """Empty sitemap XML"""
+    return '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>'

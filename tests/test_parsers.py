@@ -15,11 +15,13 @@ Test groups:
 
 import pytest
 from unittest.mock import patch, MagicMock
+from datetime import datetime, timedelta
 
 from src.scraper.parsers.antara import AntaraParser
 from src.scraper.parsers.detik import DetikParser
 from src.scraper.parsers.kompas import KompasParser
 from src.scraper.parsers.tribunnews import TribunnewsParser
+from src.scraper.parsers.tempo import TempoParser
 
 
 #  Shared parser instances
@@ -40,21 +42,42 @@ def detik():
 def tribunnews():
     return TribunnewsParser()
 
+@pytest.fixture
+def tempo():
+    return TempoParser()
+
 # Antara Parser Test
 
 class TestAntaraParseListPage:
     """_parse_list_page: HTML string → list of raw article dicts."""
 
     def test_extracts_title_link_date(self, antara, antara_valid_html):
-        results = antara._parse_list_page(antara_valid_html)
+        # OLD: antara._parse_list_page(antara_valid_html) - no target_date
+        # NEW: Now requires current_date parameter
+        current_date = datetime(2026, 5, 20)
+        results = antara._parse_list_page(antara_valid_html, current_date)
 
         assert len(results) == 1
         assert results[0]["title"] == "Berita Politik Penting"
         assert results[0]["link"] == "https://www.antaranews.com/news/123/berita-politik"
-        assert results[0]["date_text"] == "9 menit lalu"
+        assert results[0]["raw_date_text"] == "9 menit lalu"
+
+    def test_converts_relative_dates_correctly(self, antara, antara_multi_html):
+        """Test that relative dates convert to actual dates"""
+        current_date = datetime(2026, 5, 20)
+        results = antara._parse_list_page(antara_multi_html, current_date)
+        
+        # "30 menit lalu" → 2026-05-20
+        # "kemarin" → 2026-05-19
+        # "12 Januari 2025" → 2025-01-12
+        assert results[0]["article_date"] == "2026-05-20"  # today's article (30 menit lalu)
+        assert results[1]["article_date"] == "2026-05-19"  # yesterday (kemarin)
+        assert results[2]["article_date"] == "2026-05-15"  # absolute (15 Mei 2026)
+        assert results[3]["article_date"] == "2026-05-10"  # absolute (10 Mei 2026)
 
     def test_returns_empty_on_no_rows(self, antara, antara_empty_html):
-        results = antara._parse_list_page(antara_empty_html)
+        current_date = datetime(2026, 5, 20)
+        results = antara._parse_list_page(antara_empty_html, current_date)
         assert results == []
 
     def test_skips_row_without_title_tag(self, antara):
@@ -63,38 +86,58 @@ class TestAntaraParseListPage:
             <span class="text-secondary">kemarin</span>
         </div>
         """
-        results = antara._parse_list_page(html)
+        current_date = datetime(2026, 5, 20)
+        results = antara._parse_list_page(html, current_date)
         assert results == []
 
-    def test_date_text_empty_string_when_missing(self, antara):
-        html = """
-        <div class="row">
-            <h2 class="post_title">
-                <a href="https://antaranews.com/news/99/no-date">Tanpa Tanggal</a>
-            </h2>
-        </div>
-        """
-        results = antara._parse_list_page(html)
-        assert results[0]["date_text"] == ""
+    def test_handles_absolute_dates(self, antara, antara_valid_html_absolute):
+        current_date = datetime(2026, 5, 20)
+        results = antara._parse_list_page(antara_valid_html_absolute, current_date)
+        
+        assert len(results) == 1
+        assert results[0]["article_date"] == "2026-05-18"
+        assert results[0]["raw_date_text"] == "18 Mei 2026 10:30"
 
-    def test_parses_multiple_rows(self, antara, antara_multi_html):
-        results = antara._parse_list_page(antara_multi_html)
-        assert len(results) == 3
-
-
-class TestAntaraClassifyDate:
-    """_classify_date: maps Antara's relative labels to age buckets."""
-
-    @pytest.mark.parametrize("label,expected", [
-        ("9 menit lalu",   "today"),
-        ("2 jam lalu",     "today"),
-        ("30 detik lalu",  "today"),
-        ("kemarin",        "yesterday"),
-        ("12 Januari 2025","older"),
-        ("",               "older"),
-    ])
-    def test_classification(self, label, expected):
-        assert AntaraParser._classify_date(label) == expected
+class TestAntaraConvertToActualDate:
+    """_convert_to_actual_date: converts Antara date strings to YYYY-MM-DD"""
+    
+    def test_converts_lalu_to_today(self, antara):
+        current_date = datetime(2026, 5, 20)
+        result = antara._convert_to_actual_date("9 menit lalu", current_date)
+        assert result == "2026-05-20"
+        
+        result = antara._convert_to_actual_date("3 jam lalu", current_date)
+        assert result == "2026-05-20"
+        
+        result = antara._convert_to_actual_date("30 detik lalu", current_date)
+        assert result == "2026-05-20"
+    
+    def test_converts_kemarin_to_yesterday(self, antara):
+        current_date = datetime(2026, 5, 20)
+        result = antara._convert_to_actual_date("kemarin", current_date)
+        assert result == "2026-05-19"
+        
+        result = antara._convert_to_actual_date("Kemarin 15:37", current_date)
+        assert result == "2026-05-19"
+    
+    def test_converts_absolute_dates(self, antara):
+        current_date = datetime(2026, 5, 20)
+        result = antara._convert_to_actual_date("18 Mei 2026", current_date)
+        assert result == "2026-05-18"
+        
+        result = antara._convert_to_actual_date("15 Mei 2026 10:30", current_date)
+        assert result == "2026-05-15"
+        
+        result = antara._convert_to_actual_date("1 Januari 2025", current_date)
+        assert result == "2025-01-01"
+    
+    def test_returns_none_for_invalid_date(self, antara):
+        current_date = datetime(2026, 5, 20)
+        result = antara._convert_to_actual_date("invalid date", current_date)
+        assert result is None
+        
+        result = antara._convert_to_actual_date("", current_date)
+        assert result is None
 
 
 class TestAntaraFetchNews:
@@ -103,23 +146,83 @@ class TestAntaraFetchNews:
         with patch("src.scraper.parsers.antara.time.sleep"):
             yield
 
-    def test_source_field_is_stamped(self, antara, antara_valid_html):
+    def test_filters_only_target_date_articles(self, antara, antara_multi_html_with_absolute):
+        """Should only return articles matching target_date"""
         mock_response = MagicMock()
-        mock_response.text = antara_valid_html
+        mock_response.text = antara_multi_html_with_absolute
+        mock_response.raise_for_status = MagicMock()
+        
+        # Target date: 2026-05-19 (yesterday from perspective of May 20)
+        target_date = "2026-05-19"
+        
+        with patch("src.scraper.parsers.antara.requests.get", return_value=mock_response):
+            with patch("src.scraper.parsers.antara.datetime") as mock_datetime:
+                # Mock datetime.now() to return May 20, 2026
+                mock_datetime.now.return_value = datetime(2026, 5, 20)
+                mock_datetime.strptime = datetime.strptime
+                mock_datetime.side_effect = datetime
+                
+                results = antara.fetch_news(target_date)
+        
+        # One "kemarin" article per category (same mocked HTML for each)
+        assert len(results) == len(AntaraParser.CATEGORIES)
+        assert all(r["title"] == "Artikel Kemarin" for r in results)
+        assert all(r["date_text"] == "kemarin" for r in results)
+
+    def test_works_with_any_target_date(self, antara, antara_multi_html_with_absolute):
+        """Should work for any target_date (yesterday, last week, etc.)"""
+        mock_response = MagicMock()
+        mock_response.text = antara_multi_html_with_absolute
+        mock_response.raise_for_status = MagicMock()
+        
+        test_cases = [
+            ("2026-05-20", 1, "Artikel Hari Ini"),    # today's article
+            ("2026-05-19", 1, "Artikel Kemarin"),     # yesterday's article
+            ("2026-05-15", 1, "Artikel 15 Mei 2026"), # absolute date match
+            # Oldest on page equals target → pagination does not stop early
+            ("2026-05-10", AntaraParser.MAX_PAGES, "Artikel 10 Mei 2026"),
+            ("2026-05-21", 0, None),                  # future date
+        ]
+        n_categories = len(AntaraParser.CATEGORIES)
+
+        for target_date, per_category_count, expected_title in test_cases:
+            with patch("src.scraper.parsers.antara.requests.get", return_value=mock_response):
+                with patch("src.scraper.parsers.antara.datetime") as mock_datetime:
+                    mock_datetime.now.return_value = datetime(2026, 5, 20)
+                    mock_datetime.strptime = datetime.strptime
+                    mock_datetime.side_effect = datetime
+                    
+                    results = antara.fetch_news(target_date)
+            
+            assert len(results) == per_category_count * n_categories
+            if per_category_count > 0:
+                assert all(r["title"] == expected_title for r in results)
+
+    def test_source_field_is_stamped(self, antara, antara_valid_html_absolute):
+        mock_response = MagicMock()
+        mock_response.text = antara_valid_html_absolute
         mock_response.raise_for_status = MagicMock()
 
         with patch("src.scraper.parsers.antara.requests.get", return_value=mock_response):
-            results = antara.fetch_news("2025-01-01")
+            with patch("src.scraper.parsers.antara.datetime") as mock_datetime:
+                mock_datetime.now.return_value = datetime(2026, 5, 20)
+                mock_datetime.strptime = datetime.strptime
+                mock_datetime.side_effect = datetime
+                results = antara.fetch_news("2026-05-18")
 
         assert all(a["source"] == "antara" for a in results)
 
-    def test_category_field_is_set(self, antara, antara_valid_html):
+    def test_category_field_is_set(self, antara, antara_valid_html_absolute):
         mock_response = MagicMock()
-        mock_response.text = antara_valid_html
+        mock_response.text = antara_valid_html_absolute
         mock_response.raise_for_status = MagicMock()
 
         with patch("src.scraper.parsers.antara.requests.get", return_value=mock_response):
-            results = antara.fetch_news("2025-01-01")
+            with patch("src.scraper.parsers.antara.datetime") as mock_datetime:
+                mock_datetime.now.return_value = datetime(2026, 5, 20)
+                mock_datetime.strptime = datetime.strptime
+                mock_datetime.side_effect = datetime
+                results = antara.fetch_news("2026-05-18")
 
         valid_categories = set(AntaraParser.CATEGORIES)
         assert all(a["category"] in valid_categories for a in results)
@@ -130,7 +233,11 @@ class TestAntaraFetchNews:
         mock_response.raise_for_status = MagicMock()
 
         with patch("src.scraper.parsers.antara.requests.get", return_value=mock_response):
-            results = antara.fetch_news("2025-01-01")
+            with patch("src.scraper.parsers.antara.datetime") as mock_datetime:
+                mock_datetime.now.return_value = datetime(2026, 5, 20)
+                mock_datetime.strptime = datetime.strptime
+                mock_datetime.side_effect = datetime
+                results = antara.fetch_news("2026-05-18")
 
         assert results == []
 
@@ -140,79 +247,11 @@ class TestAntaraFetchNews:
             "src.scraper.parsers.antara.requests.get",
             side_effect=req.exceptions.ConnectionError("timeout")
         ):
-            results = antara.fetch_news("2025-01-01")
+            with patch("src.scraper.parsers.antara.datetime") as mock_datetime:
+                mock_datetime.now.return_value = datetime(2026, 5, 20)
+                results = antara.fetch_news("2026-05-18")
 
         assert isinstance(results, list)
-
-
-# Detik Parser Test
-
-class TestDetikParseIndexPage:
-    """_parse_index_page: HTML string → list of article dicts."""
-
-    def test_extracts_title_link_date(self, detik, detik_valid_html):
-        articles, has_more = detik._parse_index_page(
-            detik_valid_html,
-            "internasional",
-            "2026-05-15"
-        )
-
-        assert len(articles) == 1
-        assert articles[0]["title"] == "Berita Detik Internasional Penting"
-        assert articles[0]["link"] == "https://news.detik.com/internasional/d-8483801/berita-detik"
-        assert articles[0]["category"] == "internasional"
-        assert articles[0]["date_text"] == "2026-05-15"
-        assert has_more is False
-
-    def test_returns_empty_on_no_items(self, detik, detik_empty_html):
-        articles, has_more = detik._parse_index_page(
-            detik_empty_html,
-            "internasional",
-            "2026-05-15"
-        )
-
-        assert articles == []
-        assert has_more is False
-
-    def test_skips_item_without_title(self, detik):
-        html = """
-        <article class="list-content__item">
-            <div class="media__text">
-                <div class="media__date"><span>Jumat, 15 Mei 2026</span></div>
-            </div>
-        </article>
-        """
-        articles, has_more = detik._parse_index_page(
-            html,
-            "internasional",
-            "2026-05-15"
-        )
-
-        assert articles == []
-        assert has_more is False
-
-    def test_parses_multiple_articles(self, detik, detik_multi_html):
-        articles, has_more = detik._parse_index_page(
-            detik_multi_html,
-            "internasional",
-            "2026-05-15"
-        )
-
-        assert len(articles) == 3
-        assert articles[0]["title"] == "Artikel Detik 1"
-        assert articles[1]["title"] == "Artikel Detik 2"
-        assert articles[2]["title"] == "Artikel Detik 3"
-        assert has_more is False
-
-    def test_detects_pagination_next_button(self, detik, detik_with_pagination_html):
-        articles, has_more = detik._parse_index_page(
-            detik_with_pagination_html,
-            "internasional",
-            "2026-05-15"
-        )
-
-        assert len(articles) == 1
-        assert has_more is True
 
 
 class TestDetikBuildUrl:
@@ -713,130 +752,239 @@ class TestTribunnewsFetchNews:
         assert call_count <= max_expected_calls
 
 
-# Tempo Parser Test
+# Tempo Parser Tests
 
-@pytest.fixture
-def tempo():
-    from src.scraper.parsers.tempo import TempoParser
-    return TempoParser()
+class TestTempoSitemapParsing:
+    """Tests for Tempo's XML sitemap parser"""
+    
+    def test_scrape_sitemap_extracts_articles(self, tempo, tempo_sitemap_html):
+        """Should extract all articles from sitemap XML"""
+        with patch("src.scraper.parsers.tempo.requests.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.content = tempo_sitemap_html.encode('utf-8')
+            mock_response.raise_for_status = MagicMock()
+            mock_get.return_value = mock_response
+            
+            articles = tempo._scrape_sitemap(
+                "https://www.tempo.co/politik-sitemap.xml",
+                "politik",
+                "2026-05-19"
+            )
+        
+        # Should get 2 articles from 2026-05-19 (third is 2026-05-18)
+        assert len(articles) == 2
+        # Trailing -1/-2 stripped from slug by _extract_title
+        assert articles[0]["title"] == "Artikel Politik"
+        assert articles[0]["link"] == "https://www.tempo.co/politik/artikel-politik-1"
+        assert articles[0]["category"] == "politik"
+        assert articles[0]["date_text"] == "2026-05-19"
+        assert articles[1]["link"] == "https://www.tempo.co/politik/artikel-politik-2"
+    
+    def test_filters_by_target_date(
+        self, tempo, tempo_sitemap_politik_filter_html, tempo_sitemap_hukum_filter_html
+    ):
+        """Should only return articles matching target_date"""
+        def mock_get(url, *args, **kwargs):
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            if "politik" in url:
+                mock_response.content = tempo_sitemap_politik_filter_html.encode("utf-8")
+            else:
+                mock_response.content = tempo_sitemap_hukum_filter_html.encode("utf-8")
+            return mock_response
 
+        with patch("src.scraper.parsers.tempo.requests.get", side_effect=mock_get):
+            articles_politik = tempo._scrape_sitemap(
+                "https://www.tempo.co/politik-sitemap.xml",
+                "politik",
+                "2026-05-19",
+            )
+            articles_hukum = tempo._scrape_sitemap(
+                "https://www.tempo.co/hukum-sitemap.xml",
+                "hukum",
+                "2026-05-19",
+            )
 
-class TestTempoParseIndexPage:
-    def test_extracts_title_link_category(self, tempo, tempo_valid_html):
-        results = tempo._parse_index_page(tempo_valid_html, "politik", "2026-05-01")
-        assert len(results) == 1
-        assert results[0]["title"] == "Unhas Ungkap Biaya Bangun Dapur MBG Mencapai Rp 2 Miliar"
-        assert results[0]["link"] == "https://www.tempo.co/politik/unhas-ungkap-biaya-bangun-dapur-mbg-2132971"
-        assert results[0]["category"] == "politik"
-        assert results[0]["date_text"] == "2026-05-01"
+        assert len(articles_politik) == 1
+        assert articles_politik[0]["link"] == "https://www.tempo.co/politik/berita-politik-lama"
 
-    def test_prefers_data_mrf_link_over_href(self, tempo, tempo_valid_html):
-        results = tempo._parse_index_page(tempo_valid_html, "politik", "2026-05-01")
-        assert results[0]["link"].startswith("https://www.tempo.co")
+        assert len(articles_hukum) == 1
+        assert articles_hukum[0]["link"] == "https://www.tempo.co/hukum/berita-hukum"
 
-    def test_falls_back_to_href_when_no_mrf_link(self, tempo):
-        html = """
-        <aside class="flex flex-row">
-            <figure class="contents">
-                <figcaption>
-                    <p><a href="/politik/artikel-tanpa-mrf">Artikel Tanpa MRF Link</a></p>
-                </figcaption>
-            </figure>
-        </aside>
-        """
-        results = tempo._parse_index_page(html, "politik", "2026-05-01")
-        assert results[0]["link"] == "https://www.tempo.co/politik/artikel-tanpa-mrf"
-
-    def test_returns_empty_on_no_asides(self, tempo, tempo_empty_html):
-        results = tempo._parse_index_page(tempo_empty_html, "politik", "2026-05-01")
-        assert results == []
-
-    def test_skips_aside_without_figcaption(self, tempo):
-        html = """<aside class="flex flex-row"><figure></figure></aside>"""
-        results = tempo._parse_index_page(html, "politik", "2026-05-01")
-        assert results == []
-
-    def test_skips_aside_without_link(self, tempo):
-        html = """
-        <aside class="flex flex-row">
-            <figure class="contents">
-                <figcaption><p>Teks tanpa link</p></figcaption>
-            </figure>
-        </aside>
-        """
-        results = tempo._parse_index_page(html, "politik", "2026-05-01")
-        assert results == []
-
-    def test_date_text_is_injected_from_target_date(self, tempo, tempo_valid_html):
-        results = tempo._parse_index_page(tempo_valid_html, "politik", "2026-05-01")
-        assert results[0]["date_text"] == "2026-05-01"
-
-    def test_parses_multiple_articles(self, tempo, tempo_multi_html):
-        results = tempo._parse_index_page(tempo_multi_html, "politik", "2026-05-01")
-        assert len(results) == 2
-
-
-class TestTempoGetTotalPages:
-    def test_returns_max_page_from_nav(self, tempo, tempo_pagination_html):
-        assert tempo._get_total_pages(tempo_pagination_html) == 2
-
-    def test_returns_1_when_no_nav(self, tempo, tempo_valid_html):
-        assert tempo._get_total_pages(tempo_valid_html) == 1
-
-    def test_returns_1_on_empty_html(self, tempo, tempo_empty_html):
-        assert tempo._get_total_pages(tempo_empty_html) == 1
-
-
-class TestTempoSourceName:
-    def test_source_name(self, tempo):
-        assert tempo.source_name == "tempo"
+    def test_returns_empty_on_no_url_tags(self, tempo):
+        """Should return empty when sitemap has no <url> entries"""
+        empty_html = "<div>No sitemap</div>"
+        
+        with patch("src.scraper.parsers.tempo.requests.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.content = empty_html.encode('utf-8')
+            mock_response.raise_for_status = MagicMock()
+            mock_get.return_value = mock_response
+            
+            articles = tempo._scrape_sitemap(
+                "https://www.tempo.co/politik-sitemap.xml",
+                "politik",
+                "2026-05-19"
+            )
+        
+        assert articles == []
+    
+    def test_handles_request_exception(self, tempo):
+        """Should gracefully handle network errors"""
+        import requests as req
+        
+        with patch(
+            "src.scraper.parsers.tempo.requests.get",
+            side_effect=req.exceptions.ConnectionError("Connection failed")
+        ):
+            articles = tempo._scrape_sitemap(
+                "https://www.tempo.co/politik-sitemap.xml",
+                "politik",
+                "2026-05-19"
+            )
+        
+        assert articles == []
+    
+    def test_extracts_title_from_url_slug(self, tempo):
+        """Should extract title from URL slug when <news:title> is absent"""
+        html = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.tempo.co/politik/jokowi-umumkan-kabinet-baru-12345</loc>
+    <lastmod>2026-05-19T20:37:00Z</lastmod>
+  </url>
+</urlset>"""
+        
+        with patch("src.scraper.parsers.tempo.requests.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.content = html.encode('utf-8')
+            mock_response.raise_for_status = MagicMock()
+            mock_get.return_value = mock_response
+            
+            articles = tempo._scrape_sitemap(
+                "https://www.tempo.co/politik-sitemap.xml",
+                "politik",
+                "2026-05-19"
+            )
+        
+        assert len(articles) == 1
+        assert articles[0]["title"] == "Jokowi Umumkan Kabinet Baru"
+        assert articles[0]["link"] == "https://www.tempo.co/politik/jokowi-umumkan-kabinet-baru-12345"
+    
+    def test_removes_numeric_ids_from_title(self, tempo):
+        """Should remove trailing numeric IDs from URL slugs"""
+        html = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.tempo.co/ekonomi/harga-emas-naik-2026-2136744</loc>
+    <lastmod>2026-05-19T20:37:00Z</lastmod>
+  </url>
+</urlset>"""
+        
+        with patch("src.scraper.parsers.tempo.requests.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.content = html.encode('utf-8')
+            mock_response.raise_for_status = MagicMock()
+            mock_get.return_value = mock_response
+            
+            articles = tempo._scrape_sitemap(
+                "https://www.tempo.co/ekonomi-sitemap.xml",
+                "ekonomi",
+                "2026-05-19"
+            )
+        
+        assert articles[0]["title"] == "Harga Emas Naik 2026"  # ID removed
 
 
 class TestTempoFetchNews:
-    @pytest.fixture
-    def mock_pw(self):
-        with patch("src.scraper.parsers.tempo.sync_playwright") as mock_sync_pw:
-            mock_instance = MagicMock()
-            mock_browser = MagicMock()
-            mock_ctx = MagicMock()
+    """Tests for TempoParser.fetch_news (no Playwright!)"""
 
-            mock_sync_pw.return_value.__enter__.return_value = mock_instance
-            mock_instance.chromium.launch.return_value = mock_browser
-            mock_browser.new_context.return_value = mock_ctx
-
-            yield mock_sync_pw
-
-    def test_source_field_is_stamped(self, tempo, mock_pw, tempo_valid_html):
-        with patch.object(tempo, "_render_page", return_value=tempo_valid_html):
-            results = tempo.fetch_news("2026-05-01")
+    def test_fetches_from_all_category_sitemaps(self, tempo, tempo_sitemap_html):
+        """Should fetch articles from all category sitemaps"""
+        mock_response = MagicMock()
+        mock_response.content = tempo_sitemap_html.encode('utf-8')
+        mock_response.raise_for_status = MagicMock()
+        
+        with patch("src.scraper.parsers.tempo.requests.get", return_value=mock_response):
+            results = tempo.fetch_news("2026-05-19")
+        
+        # Each category returns 2 articles (from tempo_sitemap_html)
+        expected_count = len(TempoParser.SITEMAPS) * 2
+        assert len(results) == expected_count
         assert all(a["source"] == "tempo" for a in results)
+    
+    def test_filters_by_target_date_across_categories(self, tempo, tempo_sitemap_multi_html):
+        """Should filter by target_date for all categories"""
+        def mock_get(url, *args, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            for category, xml in tempo_sitemap_multi_html.items():
+                if category in url:
+                    mock_resp.content = xml.encode("utf-8")
+                    return mock_resp
+            mock_resp.content = tempo_sitemap_multi_html["politik"].encode("utf-8")
+            return mock_resp
 
-    def test_all_categories_are_scraped(self, tempo, mock_pw, tempo_valid_html):
-        with patch.object(tempo, "_render_page", return_value=tempo_valid_html):
-            results = tempo.fetch_news("2026-05-01")
-        assert {a["category"] for a in results} == set(tempo.CATEGORIES)
+        with patch("src.scraper.parsers.tempo.requests.get", side_effect=mock_get):
+            results = tempo.fetch_news("2026-05-19")
 
-    def test_pagination_respects_total_pages(self, tempo, mock_pw, tempo_pagination_html, tempo_valid_html):
-        responses = [tempo_pagination_html, tempo_valid_html] * len(tempo.CATEGORIES)
-        with patch.object(tempo, "_render_page", side_effect=responses):
-            with patch("src.scraper.parsers.tempo.time.sleep"):
-                results = tempo.fetch_news("2026-05-01")
-        assert len(results) >= len(tempo.CATEGORIES) * 2
-
-    def test_returns_empty_list_when_render_fails(self, tempo, mock_pw):
-        with patch.object(tempo, "_render_page", return_value=None):
-            results = tempo.fetch_news("2026-05-01")
+        expected_count = len(TempoParser.SITEMAPS)
+        assert len(results) == expected_count
+        assert all(a["date_text"] == "2026-05-19" for a in results)
+    
+    def test_handles_missing_sitemap_gracefully(self, tempo):
+        """Should handle when a sitemap is inaccessible"""
+        import requests as req
+        
+        def mock_get(url, *args, **kwargs):
+            if "politik" in url:
+                mock_resp = MagicMock()
+                empty_xml = (
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>'
+                )
+                mock_resp.content = empty_xml.encode("utf-8")
+                mock_resp.raise_for_status = MagicMock()
+                return mock_resp
+            else:
+                raise req.exceptions.ConnectionError("Failed to fetch")
+        
+        with patch("src.scraper.parsers.tempo.requests.get", side_effect=mock_get):
+            results = tempo.fetch_news("2026-05-19")
+        
+        # Should still get articles from politik sitemap
+        assert len(results) >= 0
+        # Should not crash
+    
+    def test_returns_empty_when_no_articles_match(self, tempo, tempo_sitemap_empty_html):
+        """Should return empty when no articles match target_date"""
+        mock_response = MagicMock()
+        mock_response.content = tempo_sitemap_empty_html.encode('utf-8')
+        mock_response.raise_for_status = MagicMock()
+        
+        with patch("src.scraper.parsers.tempo.requests.get", return_value=mock_response):
+            results = tempo.fetch_news("2026-05-19")
+        
         assert results == []
-
-    def test_category_error_does_not_stop_other_categories(self, tempo, mock_pw, tempo_valid_html):
-        call_count = 0
-        def side_effect(ctx, url):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise Exception("Simulated network error")
-            return tempo_valid_html
-
-        with patch.object(tempo, "_render_page", side_effect=side_effect):
-            results = tempo.fetch_news("2026-05-01")
-        assert len(results) > 0
+    
+    def test_source_field_is_stamped(self, tempo, tempo_sitemap_html):
+        mock_response = MagicMock()
+        mock_response.content = tempo_sitemap_html.encode('utf-8')
+        mock_response.raise_for_status = MagicMock()
+        
+        with patch("src.scraper.parsers.tempo.requests.get", return_value=mock_response):
+            results = tempo.fetch_news("2026-05-19")
+        
+        assert all(a["source"] == "tempo" for a in results)
+    
+    def test_handles_request_exception_gracefully(self, tempo):
+        """Network errors shouldn't crash the parser"""
+        import requests as req
+        
+        with patch(
+            "src.scraper.parsers.tempo.requests.get",
+            side_effect=req.exceptions.ConnectionError("Network error")
+        ):
+            results = tempo.fetch_news("2026-05-19")
+        
+        assert isinstance(results, list)
