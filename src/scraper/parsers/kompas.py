@@ -1,4 +1,3 @@
-
 """
 parsers/kompas.py
 =================
@@ -20,7 +19,7 @@ from src.scraper.base_parser import BaseParser
 class KompasParser(BaseParser):
 
     BASE_URL = "https://indeks.kompas.com/"
-    CATEGORY = "nasional"
+    CATEGORIES = ["nasional", "global"]
     REQUEST_DELAY = 1  # seconds between page requests
 
     def __init__(self):
@@ -40,7 +39,7 @@ class KompasParser(BaseParser):
 
     def fetch_news(self, target_date: str) -> list[dict]:
         """
-        Scrapes all paginated results for `target_date` from Kompas Indeks.
+        Scrapes all configured categories for target_date from Kompas Indeks.
 
         Args:
             target_date (str): Date in YYYY-MM-DD format.
@@ -48,35 +47,59 @@ class KompasParser(BaseParser):
         Returns:
             list[dict]: Stamped article list.
         """
+        all_articles = []
+
+        for category in self.CATEGORIES:
+            print(f"  [Kompas] Processing category: {category}")
+            
+            category_results = self._scrape_category(category, target_date)
+            all_articles.extend(category_results)
+            
+            print(f"  [Kompas] Collected {len(category_results)} articles for category '{category}'")
+
+        print(f"  [Kompas] Total collected across all categories: {len(all_articles)}")
+        return self._stamp(all_articles)
+
+    def _scrape_category(self, category: str, target_date: str) -> list[dict]:
+        """
+        Scrapes all paginated results for a specific category and target_date.
+        
+        Args:
+            category (str): Category name (e.g., "nasional", "global")
+            target_date (str): Date in YYYY-MM-DD format.
+            
+        Returns:
+            list[dict]: Article list for this category.
+        """
         results = []
         page = 1
 
         while True:
-            print(f"  [Kompas] Scraping page {page} for {target_date}...")
-            url = f"{self.BASE_URL}?site={self.CATEGORY}&date={target_date}&page={page}"
+            print(f"    [Kompas] Scraping page {page} for {category}...")
+            url = f"{self.BASE_URL}?site={category}&date={target_date}&page={page}"
 
             try:
                 response = requests.get(url, headers=self._headers, timeout=10)
                 response.raise_for_status()
             except requests.exceptions.RequestException as exc:
-                print(f"  [Kompas] Error fetching page {page}: {exc}")
+                print(f"    [Kompas] Error fetching page {page}: {exc}")
                 break
 
-            articles = self._parse_index_page(response.text)
+            articles = self._parse_index_page(response.text, category)
 
             if not articles:
-                print(f"  [Kompas] Pagination complete at page {page} (no articles found).")
+                print(f"    [Kompas] Pagination complete at page {page} (no articles found).")
                 break
 
             results.extend(articles)
             time.sleep(self.REQUEST_DELAY)
             page += 1
 
-        return self._stamp(results)
+        return results
 
     #  Internal helpers
 
-    def _parse_index_page(self, html: str) -> list[dict]:
+    def _parse_index_page(self, html: str, category: str) -> list[dict]:
         """Parses a single Kompas Indeks page and returns article dicts."""
         soup = BeautifulSoup(html, "html.parser")
         articles = []
@@ -100,13 +123,13 @@ class KompasParser(BaseParser):
                 link = child_a.get("href") if child_a else None
 
             if not link:
-                print(f"  [Kompas] Warning: no link found for '{title[:40]}...'")
+                print(f"    [Kompas] Warning: no link found for '{title[:40]}...'")
                 continue
 
             articles.append({
                 "title":     title,
                 "link":      link,
-                "category":  self.CATEGORY,
+                "category":  category,  # Use the specific category
                 "date_text": date_text,
             })
 
