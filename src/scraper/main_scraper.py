@@ -22,7 +22,7 @@ from config.settings import Config
 from src.scraper.parsers.antara import AntaraParser
 from src.scraper.parsers.detik import DetikParser
 from src.scraper.parsers.kompas import KompasParser
-from src.scraper.parsers.tempo import TempoParser
+# from src.scraper.parsers.tempo import TempoParser
 from src.scraper.parsers.tribunnews import TribunnewsParser
 
 #  Parser registry — add new sources here only
@@ -37,7 +37,7 @@ def build_parsers() -> list:
         AntaraParser(),
         DetikParser(),
         KompasParser(),
-        TempoParser(),
+        # TempoParser(),
         TribunnewsParser()
     ]
 
