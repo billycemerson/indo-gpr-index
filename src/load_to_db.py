@@ -61,7 +61,7 @@ def process_single_file(json_path: Path, con) -> None:
     print(f"Successfully appended {len(df_new)} rows stamped as {published_date}.")
 
 
-def load_data(load_all: bool = False):
+def load_data(load_all: bool = False, target_date: str = None):
     """
     Orchestrates the loading process. Handles connection and determines 
     whether to load a single daily file or all historical files.
@@ -97,7 +97,7 @@ def load_data(load_all: bool = False):
                 
         else:
             # Default behavior: Process only the specific daily file
-            target_file = Config.get_raw_scrape_path()
+            target_file = Config.get_raw_scrape_path(target_date)
             process_single_file(target_file, con)
             
     except Exception as e:
@@ -117,8 +117,13 @@ if __name__ == "__main__":
         action="store_true", 
         help="Load all JSON files in the raw directory. If omitted, loads only today's target file."
     )
+    parser.add_argument(
+        "--date",
+        type=str,
+        help="Target date in YYYY-MM-DD format (defaults to yesterday)."
+    )
     
     args = parser.parse_args()
     
     # Execute with the provided flag
-    load_data(load_all=args.all)
+    load_data(load_all=args.all, target_date=args.date)
