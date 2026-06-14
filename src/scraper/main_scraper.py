@@ -11,6 +11,7 @@ To add a new media source, register it in the PARSERS list below.
 No other changes are needed in this file.
 """
 
+import argparse
 import sys
 import json
 from pathlib import Path
@@ -45,7 +46,19 @@ def build_parsers() -> list:
 #  Orchestrator
 
 def main():
-    target_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    parser = argparse.ArgumentParser(description="Multi-Source Scraper")
+    parser.add_argument(
+        "--date",
+        type=str,
+        help="Target date in YYYY-MM-DD format (defaults to yesterday)."
+    )
+    args = parser.parse_args()
+
+    if args.date:
+        target_date = args.date
+    else:
+        target_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
     print(f"Multi-Source Scraper — Target Date: {target_date}\n")
 
     all_articles: list[dict] = []
@@ -77,7 +90,7 @@ def main():
     with open(output_path, "w", encoding="utf-8") as fh:
         json.dump(list(unique.values()), fh, ensure_ascii=False, indent=4)
 
-    print(f"Saved {len(unique)} articles → {output_path}")
+    print(f"Saved {len(unique)} articles -> {output_path}")
 
 
 if __name__ == "__main__":
