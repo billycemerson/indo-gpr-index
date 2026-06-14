@@ -115,3 +115,5 @@ cd dbt_project && uv run dbt run --profiles-dir .
 | `APP_ENV` | workflow `env:` block | `prod` |
 | `APP_ENV` | pytest step override | `dev` |
 | `GSHEET_KEY_JSON` | GitHub Secrets | full JSON content of `gsheet_key.json` |
+| `PREFECT_API_KEY` | GitHub Secrets | Prefect Cloud API key (e.g. `pnu_...`) |
+| `PREFECT_API_URL` | GitHub Secrets | Prefect Cloud Workspace API URL |
