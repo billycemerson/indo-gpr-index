@@ -75,17 +75,11 @@ jobs:
         env:
           APP_ENV: dev           # tests always run against dev env
 
-      - name: Step 2 — Scrape
-        run: uv run python src/scraper/main_scraper.py
-
-      - name: Step 3 — Load to DuckDB
-        run: uv run python src/load_to_db.py
-
-      - name: Step 4 — dbt transform
-        run: cd dbt_project && uv run dbt run --profiles-dir .
-
-      - name: Step 5 — Export mart to GSheet
-        run: uv run python src/export_table.py
+      - name: Step 2 — Run Prefect Pipeline
+        run: uv run python src/pipelines/run_pipeline.py
+        env:
+          PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY }}
+          PREFECT_API_URL: ${{ secrets.PREFECT_API_URL }}
 
       # ------------------------------------------------------------------ #
       #  6. Artifacts                                                        #
