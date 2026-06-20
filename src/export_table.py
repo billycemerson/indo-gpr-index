@@ -15,22 +15,30 @@ from src.exports.gsheet_client import GSheetClient
 # column used as the unique key for upsert. Column name and dtype
 # differ between daily/weekly/monthly granularity.
 # ──────────────────────────────────────────────────────────────────
+# NOTE: mart_gpr_weekly and mart_gpr_monthly are intentionally excluded here.
+# DuckDB is reset on every GitHub Actions run, so only 1 day of data exists in
+# the database at transform time — making the weekly/monthly dbt models produce
+# incorrect results (calculated from a single day instead of the full period).
+#
+# Weekly and monthly GPR indices are now calculated directly in Google Sheets
+# using SUMPRODUCT formulas on the accumulated `daily_data` tab, which is the
+# true persistent store and always contains the full historical daily rows.
 MART_CONFIG = {
     "mart_gpr_daily": {
         "worksheet": "daily_data",
         "key_column": "published_date",
         "change_column": "total_articles",
     },
-    "mart_gpr_weekly": {
-        "worksheet": "weekly_data",
-        "key_column": "week_start",
-        "change_column": "total_articles",
-    },
-    "mart_gpr_monthly": {
-        "worksheet": "monthly_data",
-        "key_column": "month_start",
-        "change_column": "total_articles",
-    },
+    # "mart_gpr_weekly": {
+    #     "worksheet": "weekly_data",
+    #     "key_column": "week_start",
+    #     "change_column": "total_articles",
+    # },
+    # "mart_gpr_monthly": {
+    #     "worksheet": "monthly_data",
+    #     "key_column": "month_start",
+    #     "change_column": "total_articles",
+    # },
 }
 
 
