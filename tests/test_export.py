@@ -1,23 +1,25 @@
 """
 test_export.py
 ==============
-Unit tests for GSheetClient and the export_gpr_daily_to_gsheet() pipeline.
+Unit tests for GSheetClient and the export_mart_to_gsheet() pipeline.
 
 Rule: ZERO real Google Sheets or DuckDB connections. Both are fully mocked.
-We test the incremental dedup logic — the only non-trivial Python here.
+We test the incremental upsert logic — the only non-trivial Python here.
 
 We do NOT test gspread internals — that's the library's own test suite.
 """
 
 import pytest
 import pandas as pd
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from src.exports.gsheet_client import GSheetClient
 
 
+# ──────────────────────────────────────────────────────────────────
 #  GSheetClient unit tests
+# ──────────────────────────────────────────────────────────────────
 
 class TestGSheetClientInit:
 
@@ -106,22 +108,74 @@ class TestGSheetClientAppendRows:
         assert count == 0
 
 
-#  export_gpr_daily_to_gsheet() integration logic
+class TestGSheetClientUpdateRows:
 
-class TestExportPipelineDedup:
+    def _make_client(self, tmp_path):
+        fake_creds = tmp_path / "creds.json"
+        fake_creds.write_text("{}")
+        with patch("src.exports.gsheet_client.ServiceAccountCredentials.from_json_keyfile_name"):
+            with patch("src.exports.gsheet_client.gspread.authorize"):
+                return GSheetClient(fake_creds)
+
+    def test_updates_rows_and_returns_count(self, tmp_path):
+        client = self._make_client(tmp_path)
+        mock_ws = MagicMock()
+        updates = [(3, ["2025-01-01", 99]), (5, ["2025-01-03", 42])]
+
+        count = client.update_rows(mock_ws, updates)
+
+        assert mock_ws.update.call_count == 2
+        assert count == 2
+
+    def test_returns_zero_and_skips_call_on_empty_updates(self, tmp_path):
+        client = self._make_client(tmp_path)
+        mock_ws = MagicMock()
+
+        count = client.update_rows(mock_ws, [])
+
+        mock_ws.update.assert_not_called()
+        assert count == 0
+
+
+# ──────────────────────────────────────────────────────────────────
+#  export_mart_to_gsheet() integration logic
+# ──────────────────────────────────────────────────────────────────
+
+class TestExportMartUpsert:
     """
-    Tests the incremental dedup logic inside export_gpr_daily_to_gsheet().
+    Tests the incremental upsert logic inside export_mart_to_gsheet().
     GSheetClient and DuckDB are fully mocked — only Python logic is tested.
+
+    Uses 'mart_gpr_daily' as the representative table since all three
+    registered marts (daily/weekly/monthly) share identical upsert logic —
+    only key_column and worksheet name differ between them.
     """
 
-    def _run_export(self, df_gold: pd.DataFrame, existing_dates: list[str]):
-        """Helper: runs the export pipeline with injected mock data."""
-        from src.export_table import export_gpr_daily_to_gsheet
+    def _run_export(
+        self,
+        table_name: str,
+        df_gold: pd.DataFrame,
+        existing_keys: list,
+        existing_change_values: list = None,
+    ):
+        """
+        Helper: runs export_mart_to_gsheet with injected mock data.
+
+        get_existing_column_values is called twice in the real function:
+          1st call → existing keys (col_index=1)
+          2nd call → existing change_column values (col_index=N)
+        side_effect supplies both responses in order.
+        """
+        from src.export_table import export_mart_to_gsheet
 
         mock_gsheet = MagicMock()
         mock_gsheet.get_worksheet.return_value = MagicMock()
-        mock_gsheet.get_existing_column_values.return_value = existing_dates
+        mock_gsheet.get_existing_column_values.side_effect = [
+            existing_keys,
+            existing_change_values if existing_change_values is not None else [],
+        ]
         mock_gsheet.append_rows.return_value = len(df_gold)
+        mock_gsheet.update_rows.return_value = 0
 
         mock_con = MagicMock()
         mock_con.sql.return_value.df.return_value = df_gold
@@ -130,45 +184,164 @@ class TestExportPipelineDedup:
             with patch("src.export_table.get_duckdb_connection", return_value=mock_con):
                 with patch("src.export_table.Config") as mock_cfg:
                     mock_cfg.GSHEET_KEY_PATH = Path("/fake/key.json")
-                    export_gpr_daily_to_gsheet()
+                    export_mart_to_gsheet(table_name)
 
         return mock_gsheet
 
+    def test_unknown_mart_name_does_not_crash(self):
+        """An unregistered table name should print a warning and return, not raise."""
+        from src.export_table import export_mart_to_gsheet
+
+        # Should not raise — just logs and returns
+        export_mart_to_gsheet("mart_does_not_exist")
+
     def test_new_dates_are_appended(self):
         """Dates not in the sheet must be sent to append_rows."""
-        df = pd.DataFrame({"published_date": ["2025-01-01", "2025-01-02"], "score": [1.0, 2.0]})
-        existing = []  # sheet is empty
-
-        mock_gsheet = self._run_export(df, existing)
+        df = pd.DataFrame({
+            "published_date": ["2025-01-01", "2025-01-02"],
+            "total_articles": [10, 12],
+        })
+        mock_gsheet = self._run_export("mart_gpr_daily", df, existing_keys=[])
 
         mock_gsheet.append_rows.assert_called_once()
         rows_sent = mock_gsheet.append_rows.call_args[0][1]
         assert len(rows_sent) == 2
 
-    def test_existing_dates_are_not_duplicated(self):
-        """Dates already in the sheet must be filtered out."""
-        df = pd.DataFrame({"published_date": ["2025-01-01", "2025-01-02"], "score": [1.0, 2.0]})
-        existing = ["2025-01-01"]  # one date already uploaded
-
-        mock_gsheet = self._run_export(df, existing)
-
-        rows_sent = mock_gsheet.append_rows.call_args[0][1]
-        assert len(rows_sent) == 1  # only the new date
-
-    def test_no_append_when_fully_up_to_date(self):
-        """If all dates exist in the sheet, append_rows must not be called."""
-        df = pd.DataFrame({"published_date": ["2025-01-01"], "score": [1.0]})
-        existing = ["2025-01-01"]
-
-        mock_gsheet = self._run_export(df, existing)
+    def test_existing_dates_with_same_value_are_skipped(self):
+        """Dates already in the sheet with unchanged total_articles must be skipped entirely."""
+        df = pd.DataFrame({
+            "published_date": ["2025-01-01"],
+            "total_articles": [10],
+        })
+        mock_gsheet = self._run_export(
+            "mart_gpr_daily", df,
+            existing_keys=["2025-01-01"],
+            existing_change_values=["10"],
+        )
 
         mock_gsheet.append_rows.assert_not_called()
+        mock_gsheet.update_rows.assert_not_called()
+
+    def test_existing_dates_with_different_value_are_updated(self):
+        """Dates already in the sheet with changed total_articles must be sent to update_rows."""
+        df = pd.DataFrame({
+            "published_date": ["2025-01-01"],
+            "total_articles": [25],  # changed from 10 -> 25, e.g. re-scrape added more articles
+        })
+        mock_gsheet = self._run_export(
+            "mart_gpr_daily", df,
+            existing_keys=["2025-01-01"],
+            existing_change_values=["10"],
+        )
+
+        mock_gsheet.append_rows.assert_not_called()
+        mock_gsheet.update_rows.assert_called_once()
+        rows_updated = mock_gsheet.update_rows.call_args[0][1]
+        assert len(rows_updated) == 1
+
+    def test_mixed_new_and_existing_dates(self):
+        """A batch with both new and unchanged dates must append only the new ones."""
+        df = pd.DataFrame({
+            "published_date": ["2025-01-01", "2025-01-02"],
+            "total_articles": [10, 15],
+        })
+        mock_gsheet = self._run_export(
+            "mart_gpr_daily", df,
+            existing_keys=["2025-01-01"],
+            existing_change_values=["10"],  # 2025-01-01 unchanged
+        )
+
+        rows_sent = mock_gsheet.append_rows.call_args[0][1]
+        assert len(rows_sent) == 1  # only 2025-01-02 is new
 
     def test_empty_db_result_exits_cleanly(self):
         """Empty DuckDB result should not crash or call append_rows."""
-        df = pd.DataFrame({"published_date": [], "score": []})
-        existing = []
-
-        mock_gsheet = self._run_export(df, existing)
+        df = pd.DataFrame({"published_date": [], "total_articles": []})
+        mock_gsheet = self._run_export("mart_gpr_daily", df, existing_keys=[])
 
         mock_gsheet.append_rows.assert_not_called()
+        mock_gsheet.update_rows.assert_not_called()
+
+    def test_weekly_mart_uses_week_start_as_key(self):
+        """mart_gpr_weekly must use week_start, not published_date, as the upsert key."""
+        df = pd.DataFrame({
+            "week_start": ["2026-05-04"],
+            "first_day_in_week": ["2026-05-04"],
+            "last_day_in_week": ["2026-05-10"],
+            "total_articles": [27],
+        })
+        mock_gsheet = self._run_export("mart_gpr_weekly", df, existing_keys=[])
+
+        mock_gsheet.append_rows.assert_called_once()
+
+    def test_monthly_mart_uses_month_start_as_key(self):
+        """mart_gpr_monthly must use month_start, not published_date, as the upsert key."""
+        df = pd.DataFrame({
+            "month_start": ["2026-05-01"],
+            "first_day_in_month": ["2026-05-01"],
+            "last_day_in_month": ["2026-05-31"],
+            "total_articles": [250],
+        })
+        mock_gsheet = self._run_export("mart_gpr_monthly", df, existing_keys=[])
+
+        mock_gsheet.append_rows.assert_called_once()
+
+
+class TestStringifyDates:
+    """
+    Tests _stringify_dates() — the fix for the 'Timestamp is not JSON
+    serializable' error that occurred when weekly/monthly marts' extra
+    date columns (first_day_in_week, last_day_in_month, etc.) were left
+    as datetime64/Timestamp objects.
+    """
+
+    def test_converts_datetime64_column_to_string(self):
+        from src.export_table import _stringify_dates
+
+        df = pd.DataFrame({
+            "week_start": pd.to_datetime(["2026-05-04", "2026-05-11"]),
+            "total_articles": [27, 12],
+        })
+        result = _stringify_dates(df)
+
+        assert result["week_start"].tolist() == ["2026-05-04", "2026-05-11"]
+        assert isinstance(result["week_start"].iloc[0], str)
+
+    def test_converts_object_dtype_date_objects_to_string(self):
+        from src.export_table import _stringify_dates
+        from datetime import date
+
+        df = pd.DataFrame({
+            "published_date": pd.array([date(2026, 5, 4), date(2026, 5, 5)], dtype="object"),
+            "total_articles": [10, 12],
+        })
+        result = _stringify_dates(df)
+
+        assert result["published_date"].tolist() == ["2026-05-04", "2026-05-05"]
+
+    def test_leaves_non_date_columns_unchanged(self):
+        from src.export_table import _stringify_dates
+
+        df = pd.DataFrame({
+            "total_articles": [10, 12],
+            "idx_war_threat": [1.5, 2.3],
+        })
+        result = _stringify_dates(df)
+
+        assert result["total_articles"].tolist() == [10, 12]
+        assert result["idx_war_threat"].tolist() == [1.5, 2.3]
+
+    def test_handles_multiple_date_columns_independently(self):
+        """The original bug: only key_column was stringified, not ALL date columns."""
+        from src.export_table import _stringify_dates
+
+        df = pd.DataFrame({
+            "week_start": pd.to_datetime(["2026-05-04"]),
+            "first_day_in_week": pd.to_datetime(["2026-05-04"]),
+            "last_day_in_week": pd.to_datetime(["2026-05-10"]),
+            "total_articles": [27],
+        })
+        result = _stringify_dates(df)
+
+        assert all(isinstance(result[col].iloc[0], str)
+                   for col in ["week_start", "first_day_in_week", "last_day_in_week"])
