@@ -146,9 +146,10 @@ class TestExportMartUpsert:
     Tests the incremental upsert logic inside export_mart_to_gsheet().
     GSheetClient and DuckDB are fully mocked — only Python logic is tested.
 
-    Uses 'mart_gpr_daily' as the representative table since all three
-    registered marts (daily/weekly/monthly) share identical upsert logic —
-    only key_column and worksheet name differ between them.
+    Only mart_gpr_daily is registered in MART_CONFIG. Weekly and monthly
+    aggregations are handled by Google Sheets formulas (SUMPRODUCT on the
+    daily_data tab) to avoid incorrect calculations caused by DuckDB being
+    reset on every GitHub Actions run.
     """
 
     def _run_export(
@@ -262,29 +263,29 @@ class TestExportMartUpsert:
         mock_gsheet.append_rows.assert_not_called()
         mock_gsheet.update_rows.assert_not_called()
 
-    def test_weekly_mart_uses_week_start_as_key(self):
-        """mart_gpr_weekly must use week_start, not published_date, as the upsert key."""
-        df = pd.DataFrame({
-            "week_start": ["2026-05-04"],
-            "first_day_in_week": ["2026-05-04"],
-            "last_day_in_week": ["2026-05-10"],
-            "total_articles": [27],
-        })
-        mock_gsheet = self._run_export("mart_gpr_weekly", df, existing_keys=[])
+    def test_weekly_mart_is_not_registered(self):
+        """
+        mart_gpr_weekly must NOT be in MART_CONFIG.
 
-        mock_gsheet.append_rows.assert_called_once()
+        Weekly aggregation is now calculated directly in Google Sheets using
+        SUMPRODUCT formulas on the accumulated daily_data tab, because DuckDB
+        is reset on every GitHub Actions run — meaning only 1 day of data
+        exists in the database at export time, making a dbt-based weekly
+        rollup incorrect.
+        """
+        from src.export_table import MART_CONFIG
+        assert "mart_gpr_weekly" not in MART_CONFIG
 
-    def test_monthly_mart_uses_month_start_as_key(self):
-        """mart_gpr_monthly must use month_start, not published_date, as the upsert key."""
-        df = pd.DataFrame({
-            "month_start": ["2026-05-01"],
-            "first_day_in_month": ["2026-05-01"],
-            "last_day_in_month": ["2026-05-31"],
-            "total_articles": [250],
-        })
-        mock_gsheet = self._run_export("mart_gpr_monthly", df, existing_keys=[])
+    def test_monthly_mart_is_not_registered(self):
+        """
+        mart_gpr_monthly must NOT be in MART_CONFIG.
 
-        mock_gsheet.append_rows.assert_called_once()
+        Same reason as weekly: DuckDB resets each run, so the monthly dbt
+        rollup would only see a single day of data. Monthly aggregation is
+        handled in Google Sheets instead.
+        """
+        from src.export_table import MART_CONFIG
+        assert "mart_gpr_monthly" not in MART_CONFIG
 
 
 class TestStringifyDates:
