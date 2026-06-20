@@ -22,9 +22,39 @@ deduplicated AS (
         -- Assign row numbers to find duplicates based on the URL
         ROW_NUMBER() OVER (PARTITION BY link ORDER BY published_date DESC) AS row_num
     FROM cleaned_data
+),
+
+deduped_final AS (
+    -- Only keep the first instance of any article
+    SELECT * EXCLUDE (row_num)
+    FROM deduplicated
+    WHERE row_num = 1
 )
 
--- Only keep the first instance of any article
-SELECT * EXCLUDE (row_num)
-FROM deduplicated
-WHERE row_num = 1
+SELECT
+    *,
+    CASE WHEN
+        -- Must mention a foreign state, cross-border body, or international actor
+        (
+            {{ match_keywords('title_cleaned', [
+                'amerika', 'china', 'tiongkok', 'rusia', 'israel', 'palestina',
+                'iran', 'korea utara', 'korea selatan', 'malaysia', 'filipina',
+                'asean', 'pbb', 'nato', 'pentagon', 'gaza', 'ukraina',
+                'laut china selatan', 'taiwan', 'hamas'
+            ]) }}
+        )
+        AND
+        -- AND must show Indonesia is a party/stake, not just a bystander reporter
+        (
+            title_cleaned ILIKE '%indonesia%'
+            OR title_cleaned ILIKE '%wni%'
+            OR title_cleaned ILIKE '%tni%'
+            OR title_cleaned ILIKE '%natuna%'
+            OR title_cleaned ILIKE '%kbri%'
+            OR title_cleaned ILIKE '%kedutaan%'
+            OR title_cleaned ILIKE '%menteri luar negeri%'
+            OR title_cleaned ILIKE '%dubes%'
+        )
+    THEN 1 ELSE 0 END AS is_indonesia_relevant
+
+FROM deduped_final
