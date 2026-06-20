@@ -15,6 +15,7 @@ WITH staging AS (
 flagged_articles AS (
     SELECT
         published_date,
+        is_indonesia_relevant,
 
         /*
          * WAR THREAT — geopolitical tension, hostile rhetoric, conflict risk.
@@ -123,12 +124,16 @@ flagged_articles AS (
 daily_aggregates AS (
     SELECT
         published_date,
-        COUNT(*) AS total_articles,
-        SUM(is_war_threat)       AS count_war_threat,
-        SUM(is_peace_threat)     AS count_peace_threat,
-        SUM(is_military_buildup) AS count_military_buildup,
-        SUM(is_war_act)          AS count_war_act,
-        SUM(is_terror_act)       AS count_terror_act
+        -- total_articles counts only Indonesia-relevant articles —
+        -- this is the denominator for a true country-specific index
+        COUNT(*) FILTER (WHERE is_indonesia_relevant = 1) AS total_articles,
+
+        SUM(CASE WHEN is_indonesia_relevant = 1 THEN is_war_threat       ELSE 0 END) AS count_war_threat,
+        SUM(CASE WHEN is_indonesia_relevant = 1 THEN is_peace_threat     ELSE 0 END) AS count_peace_threat,
+        SUM(CASE WHEN is_indonesia_relevant = 1 THEN is_military_buildup ELSE 0 END) AS count_military_buildup,
+        SUM(CASE WHEN is_indonesia_relevant = 1 THEN is_war_act          ELSE 0 END) AS count_war_act,
+        SUM(CASE WHEN is_indonesia_relevant = 1 THEN is_terror_act       ELSE 0 END) AS count_terror_act
+
     FROM flagged_articles
     GROUP BY 1
 )
@@ -137,7 +142,7 @@ SELECT
     published_date,
     total_articles,
 
-    /* --- Sub-category indices (% of total articles) --- */
+    /* --- Sub-category indices (% of Indonesia-relevant articles) --- */
     ROUND((count_war_threat       * 100.0 / NULLIF(total_articles, 0)), 4) AS idx_war_threat,
     ROUND((count_peace_threat     * 100.0 / NULLIF(total_articles, 0)), 4) AS idx_peace_threat,
     ROUND((count_military_buildup * 100.0 / NULLIF(total_articles, 0)), 4) AS idx_military_buildup,

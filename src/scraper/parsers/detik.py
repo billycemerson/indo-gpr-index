@@ -22,7 +22,7 @@ from src.scraper.base_parser import BaseParser
 class DetikParser(BaseParser):
 
     BASE_URL = "https://news.detik.com"
-    CATEGORIES = ["internasional", "bbc"]
+    CATEGORIES = ["internasional", "hukum", "berita"]
     MAX_PAGES = 20
     REQUEST_DELAY = 1
 

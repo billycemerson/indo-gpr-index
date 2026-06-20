@@ -19,7 +19,7 @@ from src.scraper.base_parser import BaseParser
 class KompasParser(BaseParser):
 
     BASE_URL = "https://indeks.kompas.com/"
-    CATEGORIES = ["nasional", "global"]
+    CATEGORIES = ["nasional", "global", "megapolitan", "regional"]
     REQUEST_DELAY = 1  # seconds between page requests
 
     def __init__(self):
