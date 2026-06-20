@@ -84,14 +84,23 @@ def load_data(load_all: bool = False, target_date: str = None):
         if load_all:
             raw_dir = Config.get_raw_scrape_path().parent
             print(f"Scanning directory {raw_dir} for historical data...")
-            
-            # Use glob to find all JSON files and sort them chronologically
-            json_files = sorted(raw_dir.glob("*.json"))
-            
+
+            # Recursive glob ("**/*.json") instead of "*.json" — GitHub Actions
+            # artifacts download into subfolders named after the artifact
+            # (e.g. raw/scrape-2026-06-20/scrape_2026-06-19.json), so a
+            # top-level-only glob silently misses every nested file.
+            json_files = sorted(
+                raw_dir.glob("**/*.json"),
+                key=lambda p: re.search(r'\d{4}-\d{2}-\d{2}', p.name).group(0)
+                if re.search(r'\d{4}-\d{2}-\d{2}', p.name) else p.name
+            )
+
             if not json_files:
                 print("No JSON files found to process.")
                 return
-                
+
+            print(f"Found {len(json_files)} JSON file(s) (including nested folders).")
+
             for file_path in json_files:
                 process_single_file(file_path, con)
                 
@@ -115,7 +124,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--all", 
         action="store_true", 
-        help="Load all JSON files in the raw directory. If omitted, loads only today's target file."
+        help="Load all JSON files in the raw directory (recursively, including artifact subfolders). If omitted, loads only today's target file."
     )
     parser.add_argument(
         "--date",
