@@ -40,8 +40,14 @@ SELECT
                 'amerika', 'china', 'tiongkok', 'rusia', 'israel', 'palestina',
                 'iran', 'korea utara', 'korea selatan', 'malaysia', 'filipina',
                 'asean', 'pbb', 'nato', 'pentagon', 'gaza', 'ukraina',
-                'laut china selatan', 'taiwan', 'hamas'
+                'laut china selatan', 'taiwan', 'hamas',
+                'turkiye', 'turki', 'zionis', 'kuwait', 'somalia',
+                'kirgistan', 'selat hormuz'
             ]) }}
+            -- Word-boundary match for 'AS' as a standalone abbreviation for
+            -- the United States. ILIKE '%as%' alone would match inside
+            -- 'asean', 'asing', 'biasa', etc.
+            OR REGEXP_MATCHES(title_cleaned, '\bas\b')
         )
         AND
         -- AND must show Indonesia is a party/stake, not just a bystander reporter
